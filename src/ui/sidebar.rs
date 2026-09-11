@@ -47,8 +47,21 @@ fn sidebar_section_heights(total_height: u16, split_ratio: f32) -> (u16, u16) {
     )
 }
 
-pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, Rect) {
-    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+pub(crate) fn expanded_sidebar_sections(
+    area: Rect,
+    split_ratio: f32,
+    on_right: bool,
+) -> (Rect, Rect) {
+    let content = if on_right {
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y,
+            area.width.saturating_sub(1),
+            area.height,
+        )
+    } else {
+        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
+    };
     if content.is_empty() {
         return (Rect::default(), Rect::default());
     }
@@ -65,8 +78,17 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
     )
 }
 
-pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
-    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32, on_right: bool) -> Rect {
+    let content = if on_right {
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y,
+            area.width.saturating_sub(1),
+            area.height,
+        )
+    } else {
+        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
+    };
     if content.width == 0 || content.height < 6 {
         return Rect::default();
     }
