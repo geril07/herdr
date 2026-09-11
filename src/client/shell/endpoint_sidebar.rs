@@ -20,8 +20,10 @@ pub(super) fn render_collapsed(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    super::render::render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = super::sidebar::collapsed_sidebar_sections(area);
+    let on_right = config.sidebar_on_right();
+    super::render::render_sidebar_background(buffer, area, palette, on_right);
+    let (workspace_area, divider_y, detail_area) =
+        super::sidebar::collapsed_sidebar_sections(area, on_right);
     let mut total_rows = 0usize;
     let mut selected_row = None;
     let reveal = std::mem::take(state.reveal_navigation_workspace);
@@ -209,7 +211,7 @@ pub(super) fn render_collapsed(
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        "»",
+        if on_right { "«" } else { "»" },
         Style::default().fg(palette.overlay0),
     );
 }
@@ -223,16 +225,19 @@ pub(super) fn render_expanded(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    super::render::render_sidebar_background(buffer, area, palette);
+    let on_right = config.sidebar_on_right();
+    super::render::render_sidebar_background(buffer, area, palette, on_right);
     hits.sidebar_divider = if area.is_empty() {
         Rect::default()
+    } else if on_right {
+        Rect::new(area.x, area.y, 1, area.height)
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
     let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
+        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split, on_right);
     hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split, on_right);
     put_text(
         buffer,
         workspace_area.x,
@@ -517,18 +522,27 @@ pub(super) fn render_expanded(
         state.agent_scroll,
         hits,
     );
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
+    hits.sidebar_toggle = if on_right {
+        Rect::new(
+            area.x.saturating_add(1),
+            area.bottom().saturating_sub(1),
+            u16::from(area.width > 1),
+            u16::from(area.height > 0),
+        )
+    } else {
+        Rect::new(
+            area.right().saturating_sub(2),
+            area.bottom().saturating_sub(1),
+            u16::from(area.width > 1),
+            u16::from(area.height > 0),
+        )
+    };
     put_text(
         buffer,
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        "«",
+        if on_right { "»" } else { "«" },
         Style::default().fg(palette.overlay0),
     );
 }

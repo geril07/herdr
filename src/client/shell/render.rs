@@ -17,9 +17,14 @@ pub(in crate::client::shell) fn render_sidebar_background(
     buffer: &mut Buffer,
     area: Rect,
     palette: &Palette,
+    on_right: bool,
 ) {
     buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
-    let separator_x = area.right().saturating_sub(1);
+    let separator_x = if on_right {
+        area.x
+    } else {
+        area.right().saturating_sub(1)
+    };
     for y in area.y..area.bottom() {
         if let Some(cell) = buffer.cell_mut((separator_x, y)) {
             cell.set_symbol("│");

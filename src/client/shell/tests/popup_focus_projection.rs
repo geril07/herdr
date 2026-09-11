@@ -171,9 +171,10 @@ fn desktop_composition_keeps_shell_outside_origin_relative_surface() {
     assert!(text.contains("main"));
     assert!(text.contains("LIVE"));
     assert!(!text.contains("1 1"));
+    let pane_origin = state.layout(106, 20).pane_surface;
     assert_eq!(
         frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
-        Some((27, 2))
+        Some((pane_origin.x + 1, pane_origin.y + 1))
     );
 }
 
@@ -788,8 +789,8 @@ fn resize_invalidation_drops_stale_hits_but_preserves_gesture_release() {
     let stale_click =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Right),
-            column: 27,
-            row: 1,
+            column: pane.inner_rect.x + 1,
+            row: pane.inner_rect.y + 1,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(stale_click.requests.is_empty());

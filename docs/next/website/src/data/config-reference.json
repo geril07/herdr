@@ -888,6 +888,16 @@
           ]
         },
         {
+          "key": "ui.sidebar_position",
+          "type": "enum",
+          "default": "left",
+          "description": "Desktop sidebar placement.",
+          "values": [
+            "left",
+            "right"
+          ]
+        },
+        {
           "key": "ui.mobile_width_threshold",
           "type": "integer",
           "default": "64",
