@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn sidebar_position_places_chrome_on_the_configured_edge() {
+    for (position, sidebar_x, pane_x, divider_x, toggle_glyph) in [
+        (crate::config::SidebarPositionConfig::Left, 0, 26, 25, "«"),
+        (crate::config::SidebarPositionConfig::Right, 80, 0, 80, "»"),
+    ] {
+        let mut base = Config::default();
+        base.ui.sidebar_position = position;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&base));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        let frame = state.compose(106, 20).expect("composed frame");
+        let layout = state.layout(106, 20);
+        assert_eq!((layout.sidebar.x, layout.sidebar.width), (sidebar_x, 26));
+        assert_eq!(
+            (layout.pane_surface.x, layout.pane_surface.width),
+            (pane_x, 80)
+        );
+        assert_eq!(state.hits.sidebar_divider.x, divider_x);
+        let toggle = state.hits.sidebar_toggle;
+        let toggle_cell =
+            &frame.cells[usize::from(toggle.y) * usize::from(frame.width) + usize::from(toggle.x)];
+        assert_eq!(toggle_cell.symbol.as_str(), toggle_glyph);
+    }
+}
+
+#[test]
 fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
     let mut snapshot = snapshot();
     snapshot.tabs.extend((2..=8).map(|number| ClientShellTab {
@@ -95,105 +121,119 @@ fn focused_workspace_change_reveals_new_workspace_in_full_sidebar() {
 
 #[test]
 fn client_owned_sidebar_dividers_resize_live() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    state.compose(106, 30).expect("expanded sidebar");
-    assert!(state.hits.machines.is_empty());
-    let workspace_body = state.hits.workspace_body;
-    let needless_scroll =
+    for position in [
+        crate::config::SidebarPositionConfig::Left,
+        crate::config::SidebarPositionConfig::Right,
+    ] {
+        // Dragging the width divider toward the pane surface grows the sidebar
+        // on either side: rightward for a left sidebar, leftward for a right one.
+        let (drag_first, divider_first, drag_second, divider_second) = match position {
+            crate::config::SidebarPositionConfig::Left => (31, 31, 32, 32),
+            crate::config::SidebarPositionConfig::Right => (74, 74, 73, 73),
+        };
+        let mut base = Config::default();
+        base.ui.sidebar_position = position;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&base));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.compose(106, 30).expect("expanded sidebar");
+        assert!(state.hits.machines.is_empty());
+        let workspace_body = state.hits.workspace_body;
+        let needless_scroll =
+            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: workspace_body.x,
+                row: workspace_body.y,
+                modifiers: KeyModifiers::empty(),
+            })]);
+        assert_eq!(state.hits.workspace_max_scroll, 0);
+        assert_eq!(state.workspace_scroll, 0);
+        assert!(!needless_scroll.repaint);
+        let width_divider = state.hits.sidebar_divider;
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::ScrollDown,
-            column: workspace_body.x,
-            row: workspace_body.y,
-            modifiers: KeyModifiers::empty(),
-        })]);
-    assert_eq!(state.hits.workspace_max_scroll, 0);
-    assert_eq!(state.workspace_scroll, 0);
-    assert!(!needless_scroll.repaint);
-    let width_divider = state.hits.sidebar_divider;
-    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: width_divider.x,
-        row: width_divider.y + 2,
-        modifiers: KeyModifiers::empty(),
-    })]);
-    let resize =
-        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Drag(MouseButton::Left),
-            column: 31,
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: width_divider.x,
             row: width_divider.y + 2,
             modifiers: KeyModifiers::empty(),
         })]);
-    assert_eq!(state.sidebar_width, 32);
-    assert!(state.sidebar_width_manual);
-    assert!(resize.repaint);
-    assert!(resize.resize);
-    let waiting_frame = state.compose(106, 30).expect("waiting for resized surface");
-    let waiting_text: String = waiting_frame
-        .cells
-        .iter()
-        .map(|cell| cell.symbol.as_str())
-        .collect();
-    assert!(
-        waiting_text.contains(" spaces"),
-        "local sidebar must keep spaces while resizing: {waiting_text}"
-    );
-    assert!(!waiting_text.contains(" machines"));
-    assert!(!waiting_text.contains("Select a connected machine"));
-    assert!(!waiting_text.contains("LIVE"));
-    assert!(waiting_frame.cursor.is_none());
-    assert!(state.pane_surface.is_none());
-    assert!(state.hits.panes.is_empty());
-    assert!(state.hits.pane_splits.is_empty());
-    assert!(state.hits.machines.is_empty());
-    assert_eq!(state.hits.sidebar_divider.x, 31);
-    assert_eq!(state.hits.workspaces[0].workspace_id, "ws_1");
+        let resize =
+            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                column: drag_first,
+                row: width_divider.y + 2,
+                modifiers: KeyModifiers::empty(),
+            })]);
+        assert_eq!(state.sidebar_width, 32);
+        assert!(state.sidebar_width_manual);
+        assert!(resize.repaint);
+        assert!(resize.resize);
+        let waiting_frame = state.compose(106, 30).expect("waiting for resized surface");
+        let waiting_text: String = waiting_frame
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(
+            waiting_text.contains(" spaces"),
+            "local sidebar must keep spaces while resizing: {waiting_text}"
+        );
+        assert!(!waiting_text.contains(" machines"));
+        assert!(!waiting_text.contains("Select a connected machine"));
+        assert!(!waiting_text.contains("LIVE"));
+        assert!(waiting_frame.cursor.is_none());
+        assert!(state.pane_surface.is_none());
+        assert!(state.hits.panes.is_empty());
+        assert!(state.hits.pane_splits.is_empty());
+        assert!(state.hits.machines.is_empty());
+        assert_eq!(state.hits.sidebar_divider.x, divider_first);
+        assert_eq!(state.hits.workspaces[0].workspace_id, "ws_1");
 
-    let next_resize =
+        let next_resize =
+            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                column: drag_second,
+                row: width_divider.y + 2,
+                modifiers: KeyModifiers::empty(),
+            })]);
+        assert!(next_resize.resize);
+        state.compose(106, 30).expect("continued resize");
+        assert_eq!(state.hits.sidebar_divider.x, divider_second);
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Drag(MouseButton::Left),
-            column: 32,
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: drag_second,
             row: width_divider.y + 2,
             modifiers: KeyModifiers::empty(),
         })]);
-    assert!(next_resize.resize);
-    state.compose(106, 30).expect("continued resize");
-    assert_eq!(state.hits.sidebar_divider.x, 32);
-    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-        kind: MouseEventKind::Up(MouseButton::Left),
-        column: 32,
-        row: width_divider.y + 2,
-        modifiers: KeyModifiers::empty(),
-    })]);
-    assert!(state.chrome_drag.is_none());
+        assert!(state.chrome_drag.is_none());
 
-    state.set_pane_surface(surface());
-    let recovered_frame = state.compose(106, 30).expect("resized sidebar");
-    let recovered_text: String = recovered_frame
-        .cells
-        .iter()
-        .map(|cell| cell.symbol.as_str())
-        .collect();
-    assert!(recovered_text.contains(" spaces"));
-    assert!(recovered_text.contains("LIVE"));
-    assert!(!state.hits.panes.is_empty());
-    let section_divider = state.hits.sidebar_section_divider;
-    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-        kind: MouseEventKind::Down(MouseButton::Left),
-        column: section_divider.x + 2,
-        row: section_divider.y,
-        modifiers: KeyModifiers::empty(),
-    })]);
-    let split = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-        kind: MouseEventKind::Drag(MouseButton::Left),
-        column: section_divider.x + 2,
-        row: 20,
-        modifiers: KeyModifiers::empty(),
-    })]);
-    assert!(state.sidebar_section_split > 0.6);
-    assert!(split.repaint);
-    assert!(!split.resize);
+        state.set_pane_surface(surface());
+        let recovered_frame = state.compose(106, 30).expect("resized sidebar");
+        let recovered_text: String = recovered_frame
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(recovered_text.contains(" spaces"));
+        assert!(recovered_text.contains("LIVE"));
+        assert!(!state.hits.panes.is_empty());
+        let section_divider = state.hits.sidebar_section_divider;
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: section_divider.x + 2,
+            row: section_divider.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+        let split =
+            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                column: section_divider.x + 2,
+                row: 20,
+                modifiers: KeyModifiers::empty(),
+            })]);
+        assert!(state.sidebar_section_split > 0.6);
+        assert!(split.repaint);
+        assert!(!split.resize);
+    }
 }
 
 #[test]
