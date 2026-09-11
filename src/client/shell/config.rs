@@ -118,6 +118,7 @@ impl ClientShellConfig {
             sidebar_max_width: config.ui.sidebar_max_width,
             sidebar_start_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
+            sidebar_position: config.ui.sidebar_position,
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
@@ -320,6 +321,7 @@ impl ClientShellConfig {
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
                 self.sidebar_collapsed_mode = ui.sidebar_collapsed_mode;
+                self.sidebar_position = ui.sidebar_position;
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
@@ -357,6 +359,10 @@ impl ClientShellConfig {
         diagnostics
     }
 
+    pub(super) fn sidebar_on_right(&self) -> bool {
+        matches!(self.sidebar_position, SidebarPositionConfig::Right)
+    }
+
     pub(super) fn layout(
         &self,
         cols: u16,
@@ -389,7 +395,12 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
-        let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
+        let main_width = cols.saturating_sub(sidebar_width);
+        let main = if self.sidebar_on_right() {
+            Rect::new(0, 0, main_width, rows)
+        } else {
+            Rect::new(sidebar_width, 0, main_width, rows)
+        };
         let show_tab_bar = rows > 1 && !(self.hide_tab_bar_when_single_tab && tab_count == 1);
         let tab_height = u16::from(show_tab_bar);
         let (tab_bar, pane_surface) = match self.tab_bar_position {
@@ -414,7 +425,11 @@ impl ClientShellConfig {
         };
 
         ClientShellLayout {
-            sidebar: Rect::new(0, 0, sidebar_width, rows),
+            sidebar: if self.sidebar_on_right() {
+                Rect::new(cols.saturating_sub(sidebar_width), 0, sidebar_width, rows)
+            } else {
+                Rect::new(0, 0, sidebar_width, rows)
+            },
             tab_bar,
             mobile_header: Rect::default(),
             pane_surface,
@@ -455,6 +470,7 @@ mod tests {
         let mut shell = ClientShellConfig::from_config(&Config::default());
         let mut next = Config::default();
         next.ui.sidebar_width = 31;
+        next.ui.sidebar_position = SidebarPositionConfig::Right;
         next.ui.tab_bar_position = TabBarPositionConfig::Bottom;
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
@@ -465,6 +481,8 @@ mod tests {
 
         assert!(diagnostics.is_empty());
         assert_eq!(shell.sidebar_width, 31);
+        assert_eq!(shell.sidebar_position, SidebarPositionConfig::Right);
+        assert!(shell.sidebar_on_right());
         assert_eq!(shell.tab_bar_position, TabBarPositionConfig::Bottom);
         assert_eq!(
             shell.agent_panel_sort,

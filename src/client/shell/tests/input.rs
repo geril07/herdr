@@ -218,8 +218,13 @@ fn client_shell_graphics_follow_final_shell_origin_and_local_overlay_visibility(
     let visible = state.compose(106, 20).expect("visible graphics frame");
     let visible = visible.graphics.clone().into_inline_bytes();
     let visible = String::from_utf8_lossy(&visible);
+    let pane_origin = state.layout(106, 20).pane_surface;
     assert!(visible.contains("a=t,t=d"));
-    assert!(visible.contains("\u{1b}[2;27H"));
+    assert!(visible.contains(&format!(
+        "\u{1b}[{};{}H",
+        pane_origin.y + 1,
+        pane_origin.x + 1
+    )));
 
     state.overlay = Some(ClientShellOverlay::Onboarding);
     let uncovered = state.compose(106, 20).expect("overlay frame");

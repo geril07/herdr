@@ -26,8 +26,18 @@ pub(in crate::client::shell) fn workspace_active_background(
 
 pub(in crate::client::shell) fn collapsed_sidebar_sections(
     area: Rect,
+    on_right: bool,
 ) -> (Rect, Option<u16>, Rect) {
-    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
+    let content = if on_right {
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y,
+            area.width.saturating_sub(1),
+            area.height,
+        )
+    } else {
+        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
+    };
     if content.is_empty() {
         return (Rect::default(), None, Rect::default());
     }
@@ -53,10 +63,11 @@ pub(crate) fn render_collapsed_sidebar(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
+    let on_right = config.sidebar_on_right();
     let selection_background = workspace_selection_background(palette);
     let active_background = workspace_active_background(palette, selected_workspace_id.is_some());
-    render_sidebar_background(buffer, area, palette);
-    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    render_sidebar_background(buffer, area, palette, on_right);
+    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area, on_right);
     for (index, workspace) in snapshot
         .workspaces
         .iter()
@@ -185,7 +196,7 @@ pub(crate) fn render_collapsed_sidebar(
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        "»",
+        if on_right { "«" } else { "»" },
         if super::super::global_menu::global_menu_attention(snapshot) {
             Style::default()
                 .fg(palette.accent)
@@ -205,16 +216,19 @@ pub(crate) fn render_sidebar(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    render_sidebar_background(buffer, area, palette);
+    let on_right = config.sidebar_on_right();
+    render_sidebar_background(buffer, area, palette, on_right);
     hits.sidebar_divider = if area.is_empty() {
         Rect::default()
+    } else if on_right {
+        Rect::new(area.x, area.y, 1, area.height)
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
     let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
+        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split, on_right);
     hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split, on_right);
     put_text(
         buffer,
         workspace_area.x,
@@ -439,18 +453,27 @@ pub(crate) fn render_sidebar(
         hits,
     );
 
-    hits.sidebar_toggle = Rect::new(
-        area.right().saturating_sub(2),
-        area.bottom().saturating_sub(1),
-        u16::from(area.width > 1),
-        u16::from(area.height > 0),
-    );
+    hits.sidebar_toggle = if on_right {
+        Rect::new(
+            area.x.saturating_add(1),
+            area.bottom().saturating_sub(1),
+            u16::from(area.width > 1),
+            u16::from(area.height > 0),
+        )
+    } else {
+        Rect::new(
+            area.right().saturating_sub(2),
+            area.bottom().saturating_sub(1),
+            u16::from(area.width > 1),
+            u16::from(area.height > 0),
+        )
+    };
     put_text(
         buffer,
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        "«",
+        if on_right { "»" } else { "«" },
         Style::default().fg(palette.overlay0),
     );
 }

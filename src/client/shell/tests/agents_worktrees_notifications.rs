@@ -8,19 +8,21 @@ fn mouse_hits_use_stable_workspace_tab_and_pane_ids() {
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");
 
+    let workspace_rect = state.hits.workspaces[0].rect;
+    let pane_inner = state.hits.panes[0].inner_rect;
     let workspace_down =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: 2,
-            row: 2,
+            column: workspace_rect.x + 2,
+            row: workspace_rect.y,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(workspace_down.actions.is_empty());
     let workspace =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Up(MouseButton::Left),
-            column: 2,
-            row: 2,
+            column: workspace_rect.x + 2,
+            row: workspace_rect.y,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(workspace.requests.is_empty());
@@ -35,8 +37,8 @@ fn mouse_hits_use_stable_workspace_tab_and_pane_ids() {
 
     let pane = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: 27,
-        row: 1,
+        column: pane_inner.x + 1,
+        row: pane_inner.y,
         modifiers: KeyModifiers::empty(),
     })]);
     assert!(pane.requests.is_empty());
@@ -210,10 +212,11 @@ fn workspace_click_waits_for_release_and_drag_reorders_by_stable_id() {
         }) if source_workspace_id == "ws_1"
     ));
     let frame = state.compose(106, 24).expect("workspace drop indicator");
+    let sidebar_x = state.hits.workspace_body.x as usize;
     assert!(frame
         .cells
         .chunks(frame.width as usize)
-        .any(|row| row.iter().take(20).any(|cell| cell.symbol == "─")));
+        .any(|row| row.iter().skip(sidebar_x).any(|cell| cell.symbol == "─")));
 
     let release =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
