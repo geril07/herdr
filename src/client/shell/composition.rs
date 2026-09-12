@@ -575,6 +575,12 @@ impl ClientShellState {
                 geometry.inner.y = geometry.outer.y.saturating_add(1);
                 occlusion.start_popup(geometry.outer);
                 let mut composed = frame.to_ratatui_buffer()?;
+                for y in composed.area.y..composed.area.bottom() {
+                    for x in composed.area.x..composed.area.right() {
+                        let cell = &mut composed[(x, y)];
+                        cell.set_style(cell.style().add_modifier(Modifier::DIM));
+                    }
+                }
                 let block = ratatui::widgets::Block::default()
                     .borders(ratatui::widgets::Borders::ALL)
                     .border_style(ratatui::style::Style::default().fg(self.config.palette.accent))
