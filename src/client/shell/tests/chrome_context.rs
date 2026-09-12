@@ -615,3 +615,145 @@ fn pane_context_menu_close_follows_pane_confirmation_setting() {
         }
     }
 }
+
+#[test]
+fn tab_close_keybind_confirms_before_closing_when_enabled() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    assert!(state.config.confirm_tab_close);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CloseTab),
+        &mut close,
+    );
+    assert!(close.actions.is_empty());
+    assert!(matches!(
+        state.overlay.as_ref(),
+        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+            target: ClientConfirmCloseTarget::Tab { tab_id },
+            ..
+        })) if tab_id == "tab_1"
+    ));
+    let frame = state.compose(106, 20).expect("tab confirmation overlay");
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Close tab?"));
+    assert!(text.contains('1'));
+
+    // Focus may move before confirming; the captured tab id still closes.
+    state.snapshot.as_mut().expect("snapshot").focused_tab_id = Some("tab_2".into());
+    let confirm = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
+        panic!("tab confirmation should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
+    ));
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn tab_close_keybind_cancel_keeps_tab() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CloseTab),
+        &mut close,
+    );
+    assert!(close.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(_))
+    ));
+    let cancel = state.handle_input_bytes(b"\x1b");
+    assert!(cancel.actions.is_empty());
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn tab_close_keybind_closes_directly_when_disabled() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.confirm_tab_close = false;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CloseTab),
+        &mut close,
+    );
+    assert!(state.overlay.is_none());
+    let [ClientShellAction::Endpoint { request, .. }] = &close.actions[..] else {
+        panic!("tab close should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
+    ));
+}
+
+#[test]
+fn tab_context_menu_close_follows_tab_confirmation_setting() {
+    for confirm_tab_close in [true, false] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.config.confirm_tab_close = confirm_tab_close;
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.open_tab_context_menu("tab_1".into(), 0, 0);
+        let close_index = match state.overlay.as_ref() {
+            Some(ClientShellOverlay::ContextMenu(menu)) => menu
+                .items()
+                .iter()
+                .position(|item| item.action == ClientContextMenuAction::Close)
+                .expect("close tab item"),
+            _ => panic!("tab context menu"),
+        };
+        let mut outcome = ClientShellInput::default();
+        state.activate_context_menu_item(close_index, &mut outcome);
+        if confirm_tab_close {
+            assert!(matches!(
+                state.overlay.as_ref(),
+                Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+                    target: ClientConfirmCloseTarget::Tab { tab_id },
+                    ..
+                })) if tab_id == "tab_1"
+            ));
+            let confirm = state.handle_input_bytes(b"\r");
+            let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
+                panic!("tab confirmation should use endpoint API");
+            };
+            assert!(matches!(
+                &request.method,
+                crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
+            ));
+        } else {
+            assert!(state.overlay.is_none());
+        }
+        let [.., ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+            panic!("tab context action should use endpoint API");
+        };
+        if confirm_tab_close {
+            // Confirming path only focuses; the close itself comes from the overlay.
+            assert!(matches!(
+                &request.method,
+                crate::api::schema::Method::TabFocus(params) if params.tab_id == "tab_1"
+            ));
+        } else {
+            assert!(matches!(
+                &request.method,
+                crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
+            ));
+        }
+    }
+}

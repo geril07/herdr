@@ -361,7 +361,11 @@ impl ClientShellState {
                 }
             }
             ClientContextMenuAction::Close => {
-                self.push_endpoint_method(Method::TabClose(TabTarget { tab_id }), outcome);
+                if self.config.confirm_tab_close {
+                    self.open_confirm_tab_close_overlay(tab_id);
+                } else {
+                    self.push_endpoint_method(Method::TabClose(TabTarget { tab_id }), outcome);
+                }
             }
             _ => {}
         }

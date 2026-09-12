@@ -1666,6 +1666,14 @@ impl ClientShellState {
                                     outcome,
                                 );
                             }
+                            ClientConfirmCloseTarget::Tab { tab_id } => {
+                                self.push_endpoint_method(
+                                    crate::api::schema::Method::TabClose(
+                                        crate::api::schema::TabTarget { tab_id },
+                                    ),
+                                    outcome,
+                                );
+                            }
                         }
                         outcome.repaint = true;
                     }

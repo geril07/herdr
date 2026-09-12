@@ -283,6 +283,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Ask for confirmation before closing a pane
 # confirm_pane_close = true
 
+# Ask for confirmation before closing a tab
+# confirm_tab_close = true
+
 # Ask for a tab name before creating a new tab.
 # Set false to create tabs immediately with generated names.
 # prompt_new_tab_name = true

@@ -99,6 +99,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) prompt_new_workspace_name: bool,
     pub(super) confirm_close: bool,
     pub(super) confirm_pane_close: bool,
+    pub(super) confirm_tab_close: bool,
     pub(super) mouse_capture: bool,
     pub(super) mouse_scroll_lines: usize,
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
@@ -624,6 +625,7 @@ pub(super) struct ClientContextMenuItem {
 pub(super) enum ClientConfirmCloseTarget {
     Workspace { workspace_id: String },
     Pane { pane_id: String },
+    Tab { tab_id: String },
 }
 
 #[derive(Debug)]
