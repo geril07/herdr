@@ -249,6 +249,44 @@ fn custom_popup_centers_in_full_window_with_visible_sidebar() {
 }
 
 #[test]
+fn popup_dims_full_window_background_but_not_popup_content() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    let dim = ratatui::style::Modifier::DIM.bits();
+    let plain = state.compose(106, 20).expect("plain frame");
+    assert_eq!(
+        plain.cells[0].modifier & dim,
+        0,
+        "background without a popup must not be dimmed"
+    );
+
+    state.set_pane_surface(surface_with_popup());
+    let frame = state.compose(106, 20).expect("popup frame");
+    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
+    assert_ne!(
+        frame.cells[0].modifier & dim,
+        0,
+        "custom popup must dim the full-window background"
+    );
+    let inner_index = usize::from(popup.inner_rect.y) * usize::from(frame.width)
+        + usize::from(popup.inner_rect.x);
+    assert_eq!(
+        frame.cells[inner_index].modifier & dim,
+        0,
+        "popup content must not inherit the background dim"
+    );
+    let border_index =
+        usize::from(popup.rect.y) * usize::from(frame.width) + usize::from(popup.rect.x);
+    assert_eq!(
+        frame.cells[border_index].modifier & dim,
+        0,
+        "popup chrome must not stay dimmed"
+    );
+}
+
+#[test]
 fn popup_owns_keys_text_paste_and_mouse_before_shell_controls() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
