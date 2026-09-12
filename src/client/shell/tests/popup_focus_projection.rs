@@ -308,7 +308,7 @@ fn popup_percent_resolves_against_full_terminal_not_pane_surface() {
     assert_eq!((popup.rect.x, popup.rect.y), (26, 5));
     assert_eq!((popup.inner_rect.x, popup.inner_rect.y), (27, 6));
     // Cell-count popups are absolute and unchanged by the base-area fix.
-    let mut surface = surface_with_popup();
+    let surface = surface_with_popup();
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface);
