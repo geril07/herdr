@@ -1,0 +1,9 @@
+{
+  "version": "0.9.0",
+  "protocol": 22,
+  "endpoint_generation": 1,
+  "notes": "### Notes\n- Custom fork update channel for geril07/herdr. This seed tracks the checked-in Cargo.toml version, so installs report up to date without an asset lookup until the first fork release regenerates this file.",
+  "assets": {},
+  "sha256": {},
+  "releases": {}
+}
