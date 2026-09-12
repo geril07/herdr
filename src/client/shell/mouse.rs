@@ -1632,15 +1632,27 @@ impl ClientShellState {
                         else {
                             return;
                         };
-                        self.push_endpoint_method(
-                            crate::api::schema::Method::WorkspaceClose(
-                                crate::api::schema::WorkspaceCloseParams {
-                                    workspace_id: confirm.workspace_id,
-                                    close_group: true,
-                                },
-                            ),
-                            outcome,
-                        );
+                        match confirm.target {
+                            ClientConfirmCloseTarget::Workspace { workspace_id } => {
+                                self.push_endpoint_method(
+                                    crate::api::schema::Method::WorkspaceClose(
+                                        crate::api::schema::WorkspaceCloseParams {
+                                            workspace_id,
+                                            close_group: true,
+                                        },
+                                    ),
+                                    outcome,
+                                );
+                            }
+                            ClientConfirmCloseTarget::Pane { pane_id } => {
+                                self.push_endpoint_method(
+                                    crate::api::schema::Method::PaneClose(
+                                        crate::api::schema::PaneTarget { pane_id },
+                                    ),
+                                    outcome,
+                                );
+                            }
+                        }
                         outcome.repaint = true;
                     }
                     _ => {}
