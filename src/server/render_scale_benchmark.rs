@@ -87,6 +87,9 @@ impl RenderPipeline {
             &mut self.app,
             target,
             Rect::new(0, 0, surface_size.cols, surface_size.rows),
+            // Benchmark has no popup; pass the full terminal as the popup base
+            // for signature consistency (popup percentages use full area).
+            Rect::new(0, 0, COLS, ROWS),
             true,
             true,
             HostCellSize {

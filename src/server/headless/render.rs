@@ -408,6 +408,15 @@ impl HeadlessServer {
         let mut broken_clients: Vec<u64> = Vec::new();
         for (client_id, (cols, rows), cell_size, _is_foreground, mode) in render_targets {
             let area = Rect::new(0, 0, cols, rows);
+            // Popup percentages resolve against the full outer terminal, not
+            // the pane surface. Older clients that never reported a full size
+            // fall back to the surface (previous behavior).
+            let (popup_cols, popup_rows) = self
+                .clients
+                .get(&client_id)
+                .map(|client| client.popup_base_size())
+                .unwrap_or((cols, rows));
+            let popup_area = Rect::new(0, 0, popup_cols, popup_rows);
             let shell_target = self.shell_target_for_client(client_id);
             let shell_tab_id = self.shell_tab_id_for_client(client_id);
             let shell_shows_popup = shell_tab_id.as_deref() == self.popup_owner_tab_id.as_deref();
@@ -494,6 +503,7 @@ impl HeadlessServer {
                         &mut self.app,
                         shell_target,
                         area,
+                        popup_area,
                         false,
                         shell_shows_popup,
                         render_cell_size,

@@ -515,8 +515,13 @@ impl ClientShellState {
         if let Some(popup) = surface.popup.as_deref() {
             let width = popup.width.map(client_popup_size);
             let height = popup.height.map(client_popup_size);
+            // Popup percentages are documented as a percentage of the full terminal
+            // area (matching tmux display-popup), not the pane surface left after
+            // client chrome (sidebar/tab bar). Center over the entire terminal so
+            // the popup overlays chrome instead of being squeezed beside it.
+            let terminal_area = Rect::new(0, 0, cols, rows);
             if let Some(mut geometry) =
-                crate::popup_size::resolve_popup_geometry(width, height, layout.pane_surface)
+                crate::popup_size::resolve_popup_geometry(width, height, terminal_area)
             {
                 // Keep the pane-surface size so the PTY matches the server,
                 // but center in the full window like native modals.

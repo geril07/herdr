@@ -2661,6 +2661,71 @@ async fn client_shell_streams_and_targets_popup_terminal_content() {
 }
 
 #[tokio::test]
+async fn popup_percent_uses_full_terminal_with_surface_fallback() {
+    // New clients report full outer size (106x20) alongside the pane surface
+    // (80x19 after sidebar 26 + tab bar 1). 50% must size against full
+    // (53x10 outer, 50x8 inner/frame), matching tmux. Older clients that never
+    // report full size keep the surface fallback (40x9 outer, 37x7 inner).
+    // Each case uses an isolated server (no shared popup pty) for determinism.
+    for (client_id, full, expected_frame) in [
+        (21u64, None, (37u16, 7u16)),
+        (22u64, Some((106u16, 20u16)), (50u16, 8u16)),
+    ] {
+        let mut server = test_headless_server();
+        let _ = install_focused_test_runtime(&mut server, b"base-pane");
+        let (popup_runtime, _) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                40, 12, 0, b"POPUP", 4,
+            );
+        let _ = server.app.install_test_popup_runtime(popup_runtime);
+        server.app.state.popup_pane.as_mut().expect("popup").width =
+            Some(crate::popup_size::PopupSize::Percent(50));
+        server.app.state.popup_pane.as_mut().expect("popup").height =
+            Some(crate::popup_size::PopupSize::Percent(50));
+
+        let (writer, control_rx, render_rx) = test_client_writer();
+        assert!(
+            server.handle_server_event(ServerEvent::ClientShellConnected {
+                client_id,
+                surface_cols: 80,
+                surface_rows: 19,
+                cell_width_px: 0,
+                cell_height_px: 0,
+                pixel_mouse: false,
+                direct_graphics: false,
+                endpoint_keybindings: false,
+                mouse_capture: false,
+                surface_active: true,
+                writer,
+            })
+        );
+        let _ = read_server_message(control_rx.recv().expect("snapshot"));
+        if let Some((cols, rows)) = full {
+            assert!(
+                server.handle_server_event(ServerEvent::ClientShellTerminalResize {
+                    client_id,
+                    cols,
+                    rows,
+                })
+            );
+        }
+        server.render_and_stream();
+        let ServerMessage::PaneSurface(surface) =
+            read_server_message(render_rx.recv().expect("popup surface"))
+        else {
+            panic!("expected pane surface");
+        };
+        let popup = surface.popup.as_deref().expect("popup surface");
+        assert_eq!(
+            (popup.frame.width, popup.frame.height),
+            expected_frame,
+            "client {client_id} with full={full:?}"
+        );
+        shutdown_test_runtimes(&mut server);
+    }
+}
+
+#[tokio::test]
 async fn terminal_popup_is_visible_and_modal_only_on_its_owning_tab() {
     let mut server = test_headless_server();
     let mut workspace = crate::workspace::Workspace::test_new("tab-popup");

@@ -196,7 +196,9 @@ height = "80%"
 The popup receives all terminal input, including Escape, until its command
 exits. `width` and `height` are optional; omit them for the default half-size
 popup, use numbers for terminal cells, or use strings like `"80%"` for a
-percentage of the terminal area. Dimensions include the popup border, and
+percentage of the full terminal area. Percentages resolve against the entire
+terminal (including the sidebar and tab bar) and the popup is centered over
+it, matching tmux `display-popup -w/-h`. Dimensions include the popup border, and
 values smaller than the popup minimum are clamped. Popup commands do not receive
 `HERDR_PANE_ID`; use `HERDR_ACTIVE_PANE_ID` for the underlying tiled pane.
 

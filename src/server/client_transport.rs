@@ -475,6 +475,17 @@ pub(crate) enum ServerEvent {
         cell_height_px: u32,
         pixel_mouse: bool,
     },
+    /// A client-owned shell reported its full outer terminal size in cells.
+    ///
+    /// Newer clients send this via `shell.terminal_size.v1` alongside the
+    /// pane-surface resize. Popup percentages and centering resolve against
+    /// this full area; older clients that never send it fall back to the
+    /// surface size.
+    ClientShellTerminalResize {
+        client_id: u64,
+        cols: u16,
+        rows: u16,
+    },
     /// A client-owned shell delivered semantic input to one stable pane target.
     ClientShellPaneInput {
         client_id: u64,
@@ -760,6 +771,7 @@ pub(crate) fn handle_client_handshake(
                     hello.endpoint_keybindings,
                     hello.mouse_capture,
                     hello.surface_active,
+                    hello.terminal_size,
                 )),
             )
         }
@@ -848,37 +860,44 @@ pub(crate) fn handle_client_handshake(
 
     // Notify the main loop about the new client.
     let endpoint_control_writer = shell_options.as_ref().map(|_| writer.control.clone());
-    let connected = if let Some((
+    let (connected, initial_terminal_size) = if let Some((
         pixel_mouse,
         direct_graphics,
         endpoint_keybindings,
         mouse_capture,
         surface_active,
+        terminal_size,
     )) = shell_options
     {
-        ServerEvent::ClientShellConnected {
-            client_id,
-            surface_cols: client_cols,
-            surface_rows: client_rows,
-            cell_width_px,
-            cell_height_px,
-            pixel_mouse,
-            direct_graphics,
-            endpoint_keybindings,
-            mouse_capture,
-            surface_active,
-            writer,
-        }
+        (
+            ServerEvent::ClientShellConnected {
+                client_id,
+                surface_cols: client_cols,
+                surface_rows: client_rows,
+                cell_width_px,
+                cell_height_px,
+                pixel_mouse,
+                direct_graphics,
+                endpoint_keybindings,
+                mouse_capture,
+                surface_active,
+                writer,
+            },
+            terminal_size,
+        )
     } else {
-        ServerEvent::ClientConnected {
-            client_id,
-            cols: client_cols,
-            rows: client_rows,
-            cell_width_px,
-            cell_height_px,
-            pixel_mouse: terminal_pixel_mouse,
-            writer,
-        }
+        (
+            ServerEvent::ClientConnected {
+                client_id,
+                cols: client_cols,
+                rows: client_rows,
+                cell_width_px,
+                cell_height_px,
+                pixel_mouse: terminal_pixel_mouse,
+                writer,
+            },
+            None,
+        )
     };
     if let Err(err) = server_event_tx.blocking_send(connected) {
         match err.0 {
@@ -887,6 +906,21 @@ pub(crate) fn handle_client_handshake(
                 send_shutdown_to_unregistered_client(&writer);
             }
             _ => {}
+        }
+        return Ok(());
+    }
+    // Newer clients report the full outer terminal size for popup geometry
+    // alongside the pane-surface hello. Forward it as a separate event so the
+    // main loop stores it before any popup renders. Older hellos omit it and
+    // keep the surface-size fallback. Invalid sizes are ignored here; the
+    // main loop also guards against empty sizes.
+    if let Some(size) = initial_terminal_size {
+        if size.cols != 0 && size.rows != 0 {
+            let _ = server_event_tx.blocking_send(ServerEvent::ClientShellTerminalResize {
+                client_id,
+                cols: size.cols,
+                rows: size.rows,
+            });
         }
     }
 
@@ -1289,6 +1323,28 @@ fn client_read_loop_with_endpoint_controls(
                     token: data,
                 }
             }
+            ClientMessage::EndpointControl { kind, data }
+                if kind == crate::protocol::endpoint::TERMINAL_SIZE_KIND =>
+            {
+                let size: crate::protocol::ClientSurfaceSize = match serde_json::from_str(&data) {
+                    Ok(size) => size,
+                    Err(error) => {
+                        debug!(client_id, %error, "ignoring invalid terminal size control");
+                        continue;
+                    }
+                };
+                // Zero sizes are invalid; ignore them and keep the last known
+                // full size (or the surface-size fallback for older clients).
+                if size.cols == 0 || size.rows == 0 {
+                    debug!(client_id, "ignoring empty terminal size control");
+                    continue;
+                }
+                ServerEvent::ClientShellTerminalResize {
+                    client_id,
+                    cols: size.cols,
+                    rows: size.rows,
+                }
+            }
             ClientMessage::EndpointControl { kind, data } => {
                 let Some(response) = crate::server::client_endpoint_control::response(&kind, data)
                 else {
@@ -1412,6 +1468,7 @@ mod tests {
                 cols: surface_cols,
                 rows: surface_rows,
             },
+            terminal_size: None,
             pixel_mouse: true,
             direct_graphics: true,
             endpoint_keybindings: true,
@@ -1938,6 +1995,57 @@ mod tests {
 
         assert!(matches!(
             recv_server_event(&mut server_event_rx, "detach after future control"),
+            ServerEvent::ClientDetach { client_id: 7 }
+        ));
+        handle
+            .join()
+            .expect("read thread join")
+            .expect("read thread result");
+    }
+
+    #[test]
+    fn client_read_loop_forwards_full_terminal_size_for_popup_geometry() {
+        let (mut client_stream, server_stream, _path) =
+            local_stream_pair("client-read-terminal-size");
+        let (server_event_tx, mut server_event_rx) = mpsc::channel(4);
+        let should_quit = Arc::new(AtomicBool::new(false));
+        let read_quit = should_quit.clone();
+        let handle = std::thread::spawn(move || {
+            client_read_loop(server_stream, 7, &server_event_tx, &read_quit)
+        });
+
+        protocol::write_message(
+            &mut client_stream,
+            &crate::protocol::endpoint::terminal_size_control(106, 20),
+        )
+        .unwrap();
+        assert!(matches!(
+            recv_server_event(&mut server_event_rx, "terminal resize"),
+            ServerEvent::ClientShellTerminalResize {
+                client_id: 7,
+                cols: 106,
+                rows: 20,
+            }
+        ));
+
+        // Invalid payloads and empty sizes are ignored without disconnecting.
+        for data in [
+            "not-json",
+            r#"{"cols":0,"rows":20}"#,
+            r#"{"cols":106,"rows":0}"#,
+        ] {
+            protocol::write_message(
+                &mut client_stream,
+                &ClientMessage::EndpointControl {
+                    kind: crate::protocol::endpoint::TERMINAL_SIZE_KIND.into(),
+                    data: data.into(),
+                },
+            )
+            .unwrap();
+        }
+        protocol::write_message(&mut client_stream, &ClientMessage::Detach).unwrap();
+        assert!(matches!(
+            recv_server_event(&mut server_event_rx, "detach after invalid terminal sizes"),
             ServerEvent::ClientDetach { client_id: 7 }
         ));
         handle
