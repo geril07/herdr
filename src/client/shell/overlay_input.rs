@@ -1040,6 +1040,27 @@ impl ClientShellState {
             crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
                 tab_id: target.tab_id,
             })
+        } else if let Some(target) = confirm.pane_target {
+            // Same staleness contract as the tab arm: the endpoint and workspace
+            // must still match, and the pane must still exist in the live
+            // snapshot under the workspace that was confirmed.
+            if target.workspace.endpoint_id != self.active_endpoint_id
+                || !self.navigation_target_valid(&target.workspace)
+                || !self.snapshot.as_deref().is_some_and(|snapshot| {
+                    snapshot.panes.iter().any(|pane| {
+                        pane.pane_id == target.pane_id
+                            && pane.workspace_id == target.workspace.workspace_id
+                    })
+                })
+            {
+                self.receive_endpoint_unavailable(
+                    "Close target changed; try closing the pane again".into(),
+                );
+                return;
+            }
+            crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                pane_id: target.pane_id,
+            })
         } else {
             crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
                 workspace_id: confirm.workspace_id,
@@ -1051,6 +1072,33 @@ impl ClientShellState {
 
     pub(super) fn open_confirm_close_overlay(&mut self, workspace_id: String) {
         self.open_close_confirmation(workspace_id, None);
+    }
+
+    /// Open the pane-close confirmation. Returns false when no live target can
+    /// be captured, so the caller can fall back to a direct close.
+    pub(super) fn open_confirm_pane_close_overlay(&mut self, pane_id: String) -> bool {
+        let Some(snapshot) = self.snapshot.as_deref() else {
+            return false;
+        };
+        let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
+            return false;
+        };
+        let workspace_id = pane.workspace_id.clone();
+        let detail = pane.label.clone().unwrap_or_else(|| pane_id.clone());
+        let Some(workspace) = self.navigation_target(&self.active_endpoint_id, &workspace_id)
+        else {
+            return false;
+        };
+        self.overlay = Some(ClientShellOverlay::ConfirmClose(
+            ClientConfirmCloseOverlay {
+                workspace_id: workspace.workspace_id.clone(),
+                tab_target: None,
+                pane_target: Some(ClientPaneCloseConfirmation { pane_id, workspace }),
+                title: "Close pane?".to_owned(),
+                detail,
+            },
+        ));
+        true
     }
 
     fn open_close_confirmation(&mut self, workspace_id: String, tab_id: Option<String>) -> bool {
@@ -1121,6 +1169,7 @@ impl ClientShellState {
             ClientConfirmCloseOverlay {
                 workspace_id,
                 tab_target,
+                pane_target: None,
                 title: if closes_group {
                     "Close worktree group?".to_owned()
                 } else {
