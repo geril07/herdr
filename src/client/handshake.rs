@@ -188,6 +188,9 @@ pub(super) fn do_handshake(
             cell_width_px,
             cell_height_px,
             surface_size,
+            // Full outer terminal for popup percentages/centering. Older
+            // servers ignore the unknown field and fall back to the surface.
+            terminal_size: Some(crate::protocol::ClientSurfaceSize { cols, rows }),
             pixel_mouse: exact_cell_size && cfg!(unix),
             direct_graphics: direct_graphics_capability(
                 local_transport,
