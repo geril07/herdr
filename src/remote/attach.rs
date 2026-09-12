@@ -30,8 +30,14 @@ const NONINTERACTIVE_SSH_STDERR_LIMIT: usize = 16 * 1024;
 const BRIDGE_FAILURE_REPORT_TIMEOUT: Duration = Duration::from_secs(1);
 const REMOTE_SERVER_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const CURRENT_PROTOCOL: u32 = crate::protocol::PROTOCOL_VERSION;
-const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
-const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
+/// Stable releases for this fork (`geril07/herdr`, `custom-v*` tags).
+const STABLE_UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-latest.json";
+/// Fork preview manifest. The fork ships no preview builds; this manifest is
+/// valid for the existing preview parser but contains no assets. Both consts
+/// stay fork-hosted so remote installs never contact upstream builds.
+const PREVIEW_UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-preview.json";
 const REMOTE_BINARY_ENV_VAR: &str = "HERDR_REMOTE_BINARY";
 const REMOTE_OUTPUT_READY_MARKER: &str = "herdr-remote-output-ready:1";
 const SSH_CONTROL_SOCKET_NAME: &str = "ctl";
@@ -2791,6 +2797,28 @@ fn sanitize_path_component(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fork_remote_manifests_never_point_at_upstream() {
+        assert_eq!(
+            STABLE_UPDATE_MANIFEST_URL,
+            "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-latest.json"
+        );
+        assert_eq!(
+            PREVIEW_UPDATE_MANIFEST_URL,
+            "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-preview.json"
+        );
+        for url in [STABLE_UPDATE_MANIFEST_URL, PREVIEW_UPDATE_MANIFEST_URL] {
+            assert!(
+                url.contains("geril07/herdr"),
+                "fork manifest must stay fork-hosted: {url}"
+            );
+            assert!(
+                !url.contains("herdr.dev"),
+                "fork manifest must not contact upstream: {url}"
+            );
+        }
+    }
 
     #[cfg(unix)]
     thread_local! {

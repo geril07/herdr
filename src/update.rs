@@ -1,6 +1,6 @@
 //! Self-update mechanism.
 //!
-//! Checks the hosted herdr.dev update manifest for newer versions.
+//! Checks the fork-hosted update manifest for newer versions.
 //! Manual `herdr update` downloads and installs the binary.
 //! Background checks only surface availability and release notes.
 //! Uses `curl` as a subprocess for HTTP — no additional Rust HTTP dependencies.
@@ -22,8 +22,13 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::Stream as _;
 use serde::{Deserialize, Deserializer};
 
-const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
-const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
+/// Stable releases for this fork (`geril07/herdr`, `custom-v*` tags).
+const STABLE_UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-latest.json";
+/// Fork preview manifest. The fork ships no preview builds; this manifest is
+/// valid for the existing preview parser but contains no assets.
+const PREVIEW_UPDATE_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";
@@ -3814,5 +3819,73 @@ mod tests {
                     .is_some_and(|value| value.len() == 64));
             }
         }
+    }
+
+    #[test]
+    fn fork_update_manifests_never_point_at_upstream() {
+        assert_eq!(
+            STABLE_UPDATE_MANIFEST_URL,
+            "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-latest.json"
+        );
+        assert_eq!(
+            PREVIEW_UPDATE_MANIFEST_URL,
+            "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-preview.json"
+        );
+        for url in [STABLE_UPDATE_MANIFEST_URL, PREVIEW_UPDATE_MANIFEST_URL] {
+            assert!(
+                url.contains("geril07/herdr"),
+                "fork manifest must stay fork-hosted: {url}"
+            );
+            assert!(
+                !url.contains("herdr.dev"),
+                "fork manifest must not contact upstream: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn fork_seed_manifest_is_up_to_date_noop() {
+        let json = include_str!("../distribution/fork-latest.json");
+        let manifest: UpdateManifest = serde_json::from_str(json)
+            .expect("distribution/fork-latest.json should match updater schema");
+
+        // The seed tracks the checked-in Cargo.toml version with the current
+        // protocol values, so installs report up to date without an asset
+        // lookup until the first fork release regenerates this file.
+        assert_eq!(
+            Version::parse(&manifest.version),
+            Some(Version::current()),
+            "fork seed version must equal Cargo.toml version"
+        );
+        assert_eq!(manifest.protocol, Some(crate::protocol::PROTOCOL_VERSION));
+        assert_eq!(
+            manifest.endpoint_generation,
+            Some(crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION)
+        );
+        assert!(!manifest
+            .metadata_for_version(&Version::current())
+            .expect("metadata")
+            .notes_body()
+            .is_empty());
+        assert_eq!(
+            release_info_from_manifest(&manifest)
+                .expect("valid seed manifest")
+                .map(|release| release.identity),
+            None,
+            "fork seed manifest must not offer an update"
+        );
+    }
+
+    #[test]
+    fn fork_preview_manifest_fails_closed_without_builds() {
+        let json = include_str!("../distribution/fork-preview.json");
+        let manifest: PreviewManifest = serde_json::from_str(json)
+            .expect("distribution/fork-preview.json should match preview schema");
+        let error = release_info_from_preview_manifest(&manifest)
+            .expect_err("fork preview channel must not offer a binary");
+        assert!(
+            error.contains("no binary") && error.contains("preview manifest"),
+            "preview users need a clear stable-only failure: {error}"
+        );
     }
 }
