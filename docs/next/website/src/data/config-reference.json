@@ -957,6 +957,12 @@
           "description": "Ask for confirmation before closing a pane."
         },
         {
+          "key": "ui.confirm_tab_close",
+          "type": "boolean",
+          "default": "true",
+          "description": "Ask for confirmation before closing a tab."
+        },
+        {
           "key": "ui.prompt_new_tab_name",
           "type": "boolean",
           "default": "true",

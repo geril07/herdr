@@ -927,6 +927,14 @@ impl ClientShellState {
                             outcome,
                         );
                     }
+                    ClientConfirmCloseTarget::Tab { tab_id } => {
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
+                                tab_id,
+                            }),
+                            outcome,
+                        );
+                    }
                 }
                 outcome.repaint = true;
             } else if key.code == KeyCode::Esc {
@@ -1151,6 +1159,22 @@ impl ClientShellState {
             ClientConfirmCloseOverlay {
                 target: ClientConfirmCloseTarget::Pane { pane_id },
                 title: "Close pane?".to_owned(),
+                detail,
+            },
+        ));
+    }
+
+    pub(super) fn open_confirm_tab_close_overlay(&mut self, tab_id: String) {
+        let detail = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
+            .map(|tab| tab.label.clone())
+            .unwrap_or_else(|| tab_id.clone());
+        self.overlay = Some(ClientShellOverlay::ConfirmClose(
+            ClientConfirmCloseOverlay {
+                target: ClientConfirmCloseTarget::Tab { tab_id },
+                title: "Close tab?".to_owned(),
                 detail,
             },
         ));
