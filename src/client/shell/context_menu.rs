@@ -461,7 +461,11 @@ impl ClientShellState {
                 outcome,
             ),
             ClientContextMenuAction::ClosePane => {
-                self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
+                if self.config.confirm_pane_close {
+                    self.open_confirm_pane_close_overlay(pane_id);
+                } else {
+                    self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
+                }
             }
             _ => {}
         }

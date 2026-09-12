@@ -418,6 +418,7 @@ fn new_tab_overlay_owns_text_cursor_and_submits_public_api_request() {
 #[test]
 fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.confirm_pane_close = false;
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     let mut close = ClientShellInput::default();
@@ -464,4 +465,153 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
         crate::api::schema::Method::WorkspaceClose(params)
             if params.workspace_id == "ws_1" && params.close_group
     ));
+}
+
+#[test]
+fn pane_close_keybind_confirms_before_closing_when_enabled() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    assert!(state.config.confirm_pane_close);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+        &mut close,
+    );
+    assert!(close.actions.is_empty());
+    assert!(matches!(
+        state.overlay.as_ref(),
+        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+            target: ClientConfirmCloseTarget::Pane { pane_id },
+            ..
+        })) if pane_id == "pane_1"
+    ));
+    let frame = state.compose(106, 20).expect("pane confirmation overlay");
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Close pane?"));
+    assert!(text.contains("pane_1"));
+
+    // Focus may move before confirming; the captured pane id still closes.
+    state.snapshot.as_mut().expect("snapshot").focused_pane_id = Some("pane_2".into());
+    let confirm = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
+        panic!("pane confirmation should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn pane_close_keybind_cancel_keeps_pane() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+        &mut close,
+    );
+    assert!(close.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(_))
+    ));
+    let cancel = state.handle_input_bytes(b"\x1b");
+    assert!(cancel.actions.is_empty());
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn pane_close_keybind_closes_directly_when_disabled() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.confirm_pane_close = false;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+        &mut close,
+    );
+    assert!(state.overlay.is_none());
+    let [ClientShellAction::Endpoint { request, .. }] = &close.actions[..] else {
+        panic!("pane close should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+}
+
+#[test]
+fn pane_context_menu_close_follows_pane_confirmation_setting() {
+    for confirm_pane_close in [true, false] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.config.confirm_pane_close = confirm_pane_close;
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.compose(106, 20).expect("composed frame");
+        let pane = state.hits.panes[0].rect;
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: pane.x + 1,
+            row: pane.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+        state.compose(106, 20).expect("pane context menu");
+        let close_index = match state.overlay.as_ref() {
+            Some(ClientShellOverlay::ContextMenu(menu)) => menu
+                .items()
+                .iter()
+                .position(|item| item.action == ClientContextMenuAction::ClosePane)
+                .expect("close pane item"),
+            _ => panic!("pane context menu"),
+        };
+        let close = state.hits.context_menu_rows[close_index].0;
+        let outcome =
+            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: close.x + 1,
+                row: close.y,
+                modifiers: KeyModifiers::empty(),
+            })]);
+        if confirm_pane_close {
+            assert!(outcome.actions.is_empty());
+            assert!(matches!(
+                state.overlay.as_ref(),
+                Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+                    target: ClientConfirmCloseTarget::Pane { pane_id },
+                    ..
+                })) if pane_id == "pane_1"
+            ));
+            let confirm = state.handle_input_bytes(b"\r");
+            let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
+                panic!("pane confirmation should use endpoint API");
+            };
+            assert!(matches!(
+                &request.method,
+                crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+            ));
+        } else {
+            assert!(state.overlay.is_none());
+            let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+                panic!("pane close should use endpoint API");
+            };
+            assert!(matches!(
+                &request.method,
+                crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+            ));
+        }
+    }
 }

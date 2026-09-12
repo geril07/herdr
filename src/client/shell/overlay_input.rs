@@ -907,21 +907,44 @@ impl ClientShellState {
                 let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
                     return;
                 };
-                self.push_endpoint_method(
-                    crate::api::schema::Method::WorkspaceClose(
-                        crate::api::schema::WorkspaceCloseParams {
-                            workspace_id: confirm.workspace_id,
-                            close_group: true,
-                        },
-                    ),
-                    outcome,
-                );
+                match confirm.target {
+                    ClientConfirmCloseTarget::Workspace { workspace_id } => {
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::WorkspaceClose(
+                                crate::api::schema::WorkspaceCloseParams {
+                                    workspace_id,
+                                    close_group: true,
+                                },
+                            ),
+                            outcome,
+                        );
+                    }
+                    ClientConfirmCloseTarget::Pane { pane_id } => {
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                                pane_id,
+                            }),
+                            outcome,
+                        );
+                    }
+                }
                 outcome.repaint = true;
             } else if key.code == KeyCode::Esc {
+                let workspace_close = matches!(
+                    self.overlay,
+                    Some(ClientShellOverlay::ConfirmClose(
+                        ClientConfirmCloseOverlay {
+                            target: ClientConfirmCloseTarget::Workspace { .. },
+                            ..
+                        }
+                    ))
+                );
                 self.overlay = None;
-                self.mode = ClientShellMode::Navigate;
-                self.navigate_workspace_id = self.focused_navigation_target();
-                self.reveal_navigation_workspace = true;
+                if workspace_close {
+                    self.mode = ClientShellMode::Navigate;
+                    self.navigate_workspace_id = self.focused_navigation_target();
+                    self.reveal_navigation_workspace = true;
+                }
                 outcome.repaint = true;
             }
             return;
@@ -1106,13 +1129,29 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
-                workspace_id,
+                target: ClientConfirmCloseTarget::Workspace { workspace_id },
                 title: if closes_group {
                     "Close worktree group?".to_owned()
                 } else {
                     "Close workspace?".to_owned()
                 },
                 detail: format!("{} — {scope}", workspace.label),
+            },
+        ));
+    }
+
+    pub(super) fn open_confirm_pane_close_overlay(&mut self, pane_id: String) {
+        let detail = self
+            .snapshot
+            .as_deref()
+            .and_then(|snapshot| snapshot.panes.iter().find(|pane| pane.pane_id == pane_id))
+            .map(|pane| pane.label.clone().unwrap_or_else(|| pane.pane_id.clone()))
+            .unwrap_or_else(|| pane_id.clone());
+        self.overlay = Some(ClientShellOverlay::ConfirmClose(
+            ClientConfirmCloseOverlay {
+                target: ClientConfirmCloseTarget::Pane { pane_id },
+                title: "Close pane?".to_owned(),
+                detail,
             },
         ));
     }
