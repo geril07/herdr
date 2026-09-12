@@ -87,6 +87,9 @@ impl RenderPipeline {
             &mut self.app,
             target,
             Rect::new(0, 0, surface_size.cols, surface_size.rows),
+            // Benchmark has no popup; pass the full terminal as the popup base
+            // for signature consistency (popup percentages use full area).
+            Rect::new(0, 0, COLS, ROWS),
             true,
             true,
             HostCellSize {
@@ -466,6 +469,9 @@ fn print_surface_damage_profiles() {
                 tab_index: 0,
             }),
             Rect::new(0, 0, COLS, ROWS),
+            // Benchmark has no popup; pass the full terminal as the popup base
+            // for signature consistency (popup percentages use full area).
+            Rect::new(0, 0, COLS, ROWS),
             true,
             false,
             HostCellSize::default(),
@@ -517,6 +523,9 @@ fn print_surface_reuse_profiles() {
                     workspace_index: 0,
                     tab_index: 0,
                 }),
+                Rect::new(0, 0, COLS, ROWS),
+                // Benchmark has no popup; pass the full terminal as the popup base
+                // for signature consistency (popup percentages use full area).
                 Rect::new(0, 0, COLS, ROWS),
                 true,
                 false,

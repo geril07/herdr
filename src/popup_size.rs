@@ -47,6 +47,14 @@ pub(crate) struct PopupResolvedGeometry {
     pub inner: Rect,
 }
 
+/// Resolve popup outer/inner geometry against the full terminal area.
+///
+/// `area` must be the full outer terminal (`Rect::new(0, 0, cols, rows)`),
+/// not the pane surface left after client chrome. Percentages (`50%`) and
+/// centering resolve against the full area to match tmux `display-popup` and
+/// the documented "percentage of the terminal area"; the popup overlays
+/// sidebar/tab bar instead of being squeezed beside it. Cell counts are
+/// absolute and unchanged; minimum clamps (6x4 outer) are unchanged.
 pub(crate) fn resolve_popup_geometry(
     width: Option<PopupSize>,
     height: Option<PopupSize>,
@@ -248,5 +256,54 @@ mod tests {
             super::resolve_popup_geometry(None, None, ratatui::layout::Rect::new(0, 0, 5, 24),)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn percent_against_full_terminal_matches_tmux_not_pane_surface() {
+        // Regression for sidebar-width narrowing: at T=106 with S=26 sidebar,
+        // pane surface is 80 wide. 50% must resolve against full (53 outer,
+        // tmux-compatible), not against the surface (40 outer, 13 cols narrow;
+        // inner 14 cols narrow with the scrollbar gutter).
+        let full = super::resolve_popup_geometry(
+            Some(PopupSize::Percent(50)),
+            Some(PopupSize::Percent(50)),
+            ratatui::layout::Rect::new(0, 0, 106, 20),
+        )
+        .unwrap();
+        assert_eq!(full.outer, ratatui::layout::Rect::new(26, 5, 53, 10));
+        assert_eq!(full.inner, ratatui::layout::Rect::new(27, 6, 50, 8));
+
+        let pane_surface = super::resolve_popup_geometry(
+            Some(PopupSize::Percent(50)),
+            Some(PopupSize::Percent(50)),
+            ratatui::layout::Rect::new(26, 0, 80, 19),
+        )
+        .unwrap();
+        assert_eq!(pane_surface.outer.width, 40);
+        assert_eq!(pane_surface.inner.width, 37);
+        assert_eq!(
+            full.inner.width as i16 - pane_surface.inner.width as i16,
+            13,
+            "inner diff must be S/2 (S=26) for same-gutter Herdr-vs-Herdr; \
+             vs tmux (no scrollbar gutter) it is S/2+1 per the filed issue"
+        );
+
+        // Cell counts are absolute and must not shift with the base area.
+        let full_cells = super::resolve_popup_geometry(
+            Some(PopupSize::Cells(12)),
+            Some(PopupSize::Cells(5)),
+            ratatui::layout::Rect::new(0, 0, 106, 20),
+        )
+        .unwrap();
+        let surface_cells = super::resolve_popup_geometry(
+            Some(PopupSize::Cells(12)),
+            Some(PopupSize::Cells(5)),
+            ratatui::layout::Rect::new(26, 0, 80, 19),
+        )
+        .unwrap();
+        assert_eq!(full_cells.outer.width, 12);
+        assert_eq!(surface_cells.outer.width, 12);
+        assert_eq!(full_cells.outer.height, 5);
+        assert_eq!(surface_cells.outer.height, 5);
     }
 }
