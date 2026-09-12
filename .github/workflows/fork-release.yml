@@ -1,0 +1,233 @@
+name: Fork release
+
+# Custom fork releases for geril07/herdr. Trigger on `custom-v*` tags only
+# (never `v*`, to avoid colliding with upstream tags). Linux binaries only;
+# macOS runners cost 10x. Upstream release workflows stay gated to
+# herdrdev/herdr and never run here.
+
+on:
+  push:
+    tags:
+      - "custom-v*"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RUST_TOOLCHAIN_VERSION: 1.96.1
+
+jobs:
+  build:
+    if: github.repository == 'geril07/herdr'
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: herdr-linux-x86_64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: herdr-linux-aarch64
+
+    runs-on: ${{ matrix.os }}
+    env:
+      LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+      LIBGHOSTTY_VT_SIMD: 'true'
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify tag matches Cargo.toml version
+        shell: bash
+        run: |
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          TAG_VERSION="${GITHUB_REF_NAME#custom-v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "error: tag $GITHUB_REF_NAME doesn't match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Prefer official Ubuntu mirrors over Azure
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure.archive.ubuntu.com/d' /etc/apt/apt-mirrors.txt
+            echo "Using apt mirrors:"
+            cat /etc/apt/apt-mirrors.txt
+          fi
+
+      - name: Install Linux build tools
+        run: |
+          sudo find /etc/apt/sources.list.d -type f \( -iname '*microsoft*' -o -iname '*azure-cli*' \) -print -delete
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build musl-tools gcc-aarch64-linux-gnu crossbuild-essential-arm64
+
+      - name: Set Linux aarch64 linker
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: release-fork-${{ matrix.target }}
+
+      - name: Remove Zig caches
+        shell: bash
+        run: rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          cp target/${{ matrix.target }}/release/herdr ${{ matrix.name }}
+          file ${{ matrix.name }}
+          ldd ${{ matrix.name }} 2>&1 | tee /tmp/ldd.txt
+          grep -q "statically linked" /tmp/ldd.txt
+          if nm -u ${{ matrix.name }} 2>/dev/null | grep -E '(__cxa|GLIBCXX|CXXABI|_ZSt)'; then
+            echo "error: Linux artifact has unresolved C++ runtime symbols" >&2
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  release:
+    needs: build
+    if: github.repository == 'geril07/herdr'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: fork-manifest-master
+      cancel-in-progress: false
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#custom-v}"
+          TAG_SHA="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          cat > RELEASE_NOTES.md <<EOF
+          Custom fork release \`$GITHUB_REF_NAME\` for geril07/herdr.
+
+          Built from \`$TAG_SHA\`. Linux binaries only.
+          EOF
+
+      - name: Create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file RELEASE_NOTES.md \
+            herdr-linux-x86_64/herdr-linux-x86_64 \
+            herdr-linux-aarch64/herdr-linux-aarch64
+
+      - name: Regenerate fork update manifest
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#custom-v}"
+          TAG="custom-v$VERSION"
+          RELEASE_PROTOCOL=$(git show "${GITHUB_REF_NAME}:src/protocol/wire.rs" | python3 -c 'import re, sys; match = re.search(r"pub const PROTOCOL_VERSION: u32 = (\d+);", sys.stdin.read()); sys.exit(1) if match is None else print(match.group(1))')
+          RELEASE_ENDPOINT_GENERATION=$(git show "${GITHUB_REF_NAME}:src/protocol/endpoint.rs" | python3 -c 'import re, sys; match = re.search(r"pub const ENDPOINT_PROTOCOL_GENERATION: u32 = (\d+);", sys.stdin.read()); sys.exit(1) if match is None else print(match.group(1))')
+          export TAG VERSION RELEASE_PROTOCOL RELEASE_ENDPOINT_GENERATION
+          python3 - <<'EOF'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          tag = os.environ["TAG"]
+          version = os.environ["VERSION"]
+          manifest_path = Path("distribution/fork-latest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          notes = Path("RELEASE_NOTES.md").read_text(encoding="utf-8").strip()
+          if not notes:
+              raise SystemExit("release notes are empty")
+
+          targets = ("linux-x86_64", "linux-aarch64")
+          assets = {}
+          sha256 = {}
+          for target in targets:
+              artifact = Path(f"herdr-{target}/herdr-{target}")
+              assets[target] = (
+                  f"https://github.com/geril07/herdr/releases/download/{tag}/herdr-{target}"
+              )
+              sha256[target] = hashlib.sha256(artifact.read_bytes()).hexdigest()
+
+          entry = {
+              "notes": notes,
+              "protocol": int(os.environ["RELEASE_PROTOCOL"]),
+              "endpoint_generation": int(os.environ["RELEASE_ENDPOINT_GENERATION"]),
+              "assets": assets,
+              "sha256": sha256,
+          }
+          releases = {version: entry}
+          for old_version, old_entry in manifest.get("releases", {}).items():
+              if old_version != version:
+                  releases[old_version] = old_entry
+
+          manifest.update(
+              {
+                  "version": version,
+                  "protocol": entry["protocol"],
+                  "endpoint_generation": entry["endpoint_generation"],
+                  "notes": notes,
+                  "assets": assets,
+                  "sha256": sha256,
+                  "releases": releases,
+              }
+          )
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          print(f"updated {manifest_path} to {tag}")
+          EOF
+
+      - name: Commit fork manifest to master
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#custom-v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add distribution/fork-latest.json
+          git diff --cached --quiet || git commit -m "chore(custom): publish fork manifest for custom-v$VERSION"
+          for attempt in 1 2 3; do
+            git pull --rebase origin master
+            if git push origin master; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "master changed during fork manifest publishing; retrying ($attempt/3)"
+              sleep $((attempt * 2))
+            fi
+          done
+          echo "failed to publish fork manifest after 3 attempts" >&2
+          exit 1
