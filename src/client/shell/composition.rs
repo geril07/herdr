@@ -515,9 +515,17 @@ impl ClientShellState {
         if let Some(popup) = surface.popup.as_deref() {
             let width = popup.width.map(client_popup_size);
             let height = popup.height.map(client_popup_size);
-            if let Some(geometry) =
+            if let Some(mut geometry) =
                 crate::popup_size::resolve_popup_geometry(width, height, layout.pane_surface)
             {
+                // Keep the pane-surface size so the PTY matches the server,
+                // but center in the full window like native modals.
+                let window = Rect::new(0, 0, cols, rows);
+                geometry.outer.x = window.x + window.width.saturating_sub(geometry.outer.width) / 2;
+                geometry.outer.y =
+                    window.y + window.height.saturating_sub(geometry.outer.height) / 2;
+                geometry.inner.x = geometry.outer.x.saturating_add(1);
+                geometry.inner.y = geometry.outer.y.saturating_add(1);
                 let mut composed = frame.to_ratatui_buffer()?;
                 let block = ratatui::widgets::Block::default()
                     .borders(ratatui::widgets::Borders::ALL)

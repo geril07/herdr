@@ -208,6 +208,46 @@ fn client_composes_popup_terminal_content_inside_client_owned_chrome() {
 }
 
 #[test]
+fn custom_popup_centers_in_full_window_with_visible_sidebar() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface_with_popup());
+
+    let (cols, rows) = (106, 20);
+    let layout = state.layout(cols, rows);
+    assert!(layout.sidebar.width > 0);
+    state.compose(cols, rows).expect("popup frame");
+    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
+    // Fixed 12x5 cells: size is unchanged, position is window-centered, not pane-centered.
+    assert_eq!(popup.rect.width, 12);
+    assert_eq!(popup.rect.height, 5);
+    assert_eq!(popup.rect.x, (cols - 12) / 2);
+    assert_eq!(popup.rect.y, (rows - 5) / 2);
+    assert_eq!(popup.inner_rect.width, 9);
+    assert_eq!(popup.inner_rect.height, 3);
+
+    // Percent sizes still resolve against the pane surface so the PTY does not grow,
+    // while the position stays window-centered.
+    let mut percent_surface = surface_with_popup();
+    let percent_popup = percent_surface.popup.as_mut().expect("popup surface");
+    percent_popup.width = Some(crate::protocol::ClientShellPopupSize::Percent(50));
+    percent_popup.height = Some(crate::protocol::ClientShellPopupSize::Percent(50));
+    state.set_pane_surface(percent_surface);
+    state.compose(cols, rows).expect("percent popup frame");
+    let popup = state.hits.popup.as_ref().expect("percent popup hit");
+    let expected_size = crate::popup_size::resolve_popup_geometry(
+        Some(crate::popup_size::PopupSize::Percent(50)),
+        Some(crate::popup_size::PopupSize::Percent(50)),
+        layout.pane_surface,
+    )
+    .expect("pane-surface geometry");
+    assert_eq!(popup.rect.width, expected_size.outer.width);
+    assert_eq!(popup.rect.height, expected_size.outer.height);
+    assert_eq!(popup.rect.x, (cols - popup.rect.width) / 2);
+    assert_eq!(popup.rect.y, (rows - popup.rect.height) / 2);
+}
+
+#[test]
 fn popup_owns_keys_text_paste_and_mouse_before_shell_controls() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
