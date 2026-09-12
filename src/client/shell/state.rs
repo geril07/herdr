@@ -48,6 +48,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) prompt_new_tab_name: bool,
     pub(super) prompt_new_workspace_name: bool,
     pub(super) confirm_close: bool,
+    pub(super) confirm_pane_close: bool,
     pub(super) mouse_capture: bool,
     pub(super) mouse_scroll_lines: usize,
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
@@ -577,9 +578,16 @@ pub(super) struct ClientTabCloseConfirmation {
 }
 
 #[derive(Debug)]
+pub(super) struct ClientPaneCloseConfirmation {
+    pub(super) pane_id: String,
+    pub(super) workspace: WorkspaceNavigationTarget,
+}
+
+#[derive(Debug)]
 pub(super) struct ClientConfirmCloseOverlay {
     pub(super) workspace_id: String,
     pub(super) tab_target: Option<ClientTabCloseConfirmation>,
+    pub(super) pane_target: Option<ClientPaneCloseConfirmation>,
     pub(super) title: String,
     pub(super) detail: String,
 }
