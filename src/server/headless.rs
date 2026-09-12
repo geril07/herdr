@@ -2253,6 +2253,31 @@ impl HeadlessServer {
                 self.resize_shell_tab_if_controller(client_id, true);
                 true
             }
+            ServerEvent::ClientShellTerminalResize {
+                client_id,
+                cols,
+                rows,
+            } => {
+                let Some(client) = self.clients.get_mut(&client_id) else {
+                    return false;
+                };
+                if !matches!(client.mode, ClientConnectionMode::ClientShell) {
+                    return false;
+                }
+                if client.full_terminal_size == Some((cols, rows)) {
+                    return false;
+                }
+                client.full_terminal_size = Some((cols, rows));
+                if !client.shell_surface_active {
+                    return false;
+                }
+                // Tabs use the pane surface (unchanged here); only the popup
+                // base changes, so resize the popup runtime when this client
+                // drives the owner tab and repaint for the new popup frame.
+                client.request_repaint();
+                self.resize_popup_for_terminal_resize(client_id);
+                true
+            }
             ServerEvent::ClientShellHostTheme { client_id, update } => {
                 let Some(client) = self.clients.get_mut(&client_id) else {
                     return false;

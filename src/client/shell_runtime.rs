@@ -601,6 +601,16 @@ pub(super) fn install_client_shell_snapshot(
     if let Some(resize) = resize {
         endpoints.send_to(endpoint_id, &resize);
     }
+    // New endpoints need the full terminal size for popup geometry before any
+    // popup renders. Always report it on snapshot install (new connection);
+    // old servers ignore the unknown control and keep the surface fallback.
+    endpoints.send_to(
+        endpoint_id,
+        &crate::protocol::endpoint::terminal_size_control(
+            state.reported_size.0,
+            state.reported_size.1,
+        ),
+    );
     if let Some(frame) = composed {
         if projection_pending {
             state.present_frame(frame);

@@ -227,8 +227,8 @@ fn custom_popup_centers_in_full_window_with_visible_sidebar() {
     assert_eq!(popup.inner_rect.width, 9);
     assert_eq!(popup.inner_rect.height, 3);
 
-    // Percent sizes still resolve against the pane surface so the PTY does not grow,
-    // while the position stays window-centered.
+    // Percent sizes resolve against the full terminal area (tmux display-popup
+    // semantics); the position stays window-centered.
     let mut percent_surface = surface_with_popup();
     let percent_popup = percent_surface.popup.as_mut().expect("popup surface");
     percent_popup.width = Some(crate::protocol::ClientShellPopupSize::Percent(50));
@@ -236,12 +236,13 @@ fn custom_popup_centers_in_full_window_with_visible_sidebar() {
     state.set_pane_surface(percent_surface);
     state.compose(cols, rows).expect("percent popup frame");
     let popup = state.hits.popup.as_ref().expect("percent popup hit");
+    let window = Rect::new(0, 0, cols, rows);
     let expected_size = crate::popup_size::resolve_popup_geometry(
         Some(crate::popup_size::PopupSize::Percent(50)),
         Some(crate::popup_size::PopupSize::Percent(50)),
-        layout.pane_surface,
+        window,
     )
-    .expect("pane-surface geometry");
+    .expect("terminal-area geometry");
     assert_eq!(popup.rect.width, expected_size.outer.width);
     assert_eq!(popup.rect.height, expected_size.outer.height);
     assert_eq!(popup.rect.x, (cols - popup.rect.width) / 2);
@@ -284,6 +285,37 @@ fn popup_dims_full_window_background_but_not_popup_content() {
         0,
         "popup chrome must not stay dimmed"
     );
+}
+
+#[test]
+fn popup_percent_resolves_against_full_terminal_not_pane_surface() {
+    // At 106x20 with default sidebar 26, pane surface is 80x19. 50% must give
+    // 53x10 outer (full) centered over the terminal, not 40x9 (surface).
+    let mut surface = surface_with_popup();
+    surface.popup.as_mut().expect("popup").width =
+        Some(crate::protocol::ClientShellPopupSize::Percent(50));
+    surface.popup.as_mut().expect("popup").height =
+        Some(crate::protocol::ClientShellPopupSize::Percent(50));
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface);
+
+    let frame = state.compose(106, 20).expect("popup frame");
+    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
+    assert_eq!((popup.rect.width, popup.rect.height), (53, 10));
+    assert_eq!((popup.inner_rect.width, popup.inner_rect.height), (50, 8));
+    // Centered over full 106x20: x=(106-53)/2=26, y=(20-10)/2=5.
+    assert_eq!((popup.rect.x, popup.rect.y), (26, 5));
+    assert_eq!((popup.inner_rect.x, popup.inner_rect.y), (27, 6));
+    // Cell-count popups are absolute and unchanged by the base-area fix.
+    let mut surface = surface_with_popup();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface);
+    let _ = state.compose(106, 20).expect("popup frame");
+    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
+    assert_eq!((popup.rect.width, popup.rect.height), (12, 5));
+    let _ = frame;
 }
 
 #[test]

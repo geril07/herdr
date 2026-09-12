@@ -265,6 +265,7 @@ impl HeadlessServer {
                 | Method::PaneSplit(_)
                 | Method::PaneSwap(_)
                 | Method::PaneZoom(_)
+                | Method::PluginPaneOpen(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
                 | Method::TabFocus(_)
@@ -298,6 +299,7 @@ impl HeadlessServer {
                 | Method::PaneSplit(_)
                 | Method::PaneSwap(_)
                 | Method::PaneZoom(_)
+                | Method::PluginPaneOpen(_)
                 | Method::TabClose(_)
                 | Method::TabCreate(_)
                 | Method::TabFocus(_)
@@ -567,6 +569,7 @@ impl HeadlessServer {
             return false;
         };
         let (cols, rows) = client.terminal_size;
+        let (full_cols, full_rows) = client.popup_base_size();
         let cell_size = if client.cell_size.is_known() {
             client.cell_size
         } else {
@@ -601,9 +604,39 @@ impl HeadlessServer {
             .as_deref()
             .is_some_and(|owner| self.tab_id_for_target(target).as_deref() == Some(owner))
         {
-            let _ = resize_popup_runtime(&self.app, Rect::new(0, 0, cols, rows), cell_size);
+            // Popup percentages resolve against the full terminal area, not
+            // the pane surface left after client chrome.
+            let _ =
+                resize_popup_runtime(&self.app, Rect::new(0, 0, full_cols, full_rows), cell_size);
         }
         true
+    }
+
+    /// Resize only the popup runtime after a full-terminal-size update.
+    ///
+    /// Tab runtimes use the pane surface (unchanged here); only popup
+    /// geometry depends on the outer terminal size.
+    pub(super) fn resize_popup_for_terminal_resize(&mut self, client_id: u64) {
+        let Some(target) = self.shell_target_for_client(client_id) else {
+            return;
+        };
+        if self
+            .popup_owner_tab_id
+            .as_deref()
+            .is_none_or(|owner| self.tab_id_for_target(target).as_deref() != Some(owner))
+        {
+            return;
+        }
+        let Some(client) = self.clients.get(&client_id) else {
+            return;
+        };
+        let (full_cols, full_rows) = client.popup_base_size();
+        let cell_size = if client.cell_size.is_known() {
+            client.cell_size
+        } else {
+            crate::kitty_graphics::HostCellSize::default()
+        };
+        let _ = resize_popup_runtime(&self.app, Rect::new(0, 0, full_cols, full_rows), cell_size);
     }
 
     pub(super) fn resize_tabs_for_only_shell_client(

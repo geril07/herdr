@@ -27,6 +27,27 @@ pub const PRESENTATION_EFFECTS_READY_KIND: &str = "endpoint.presentation.ready.v
 pub const HEALTH_CHECK_CAPABILITY: &str = "health_check";
 pub const HEALTH_PING_KIND: &str = "endpoint.health.ping.v1";
 pub const HEALTH_PONG_KIND: &str = "endpoint.health.pong.v1";
+/// Optional client-to-server control carrying the full outer terminal size in
+/// cells. Unlike `surface_size` (pane surface without sidebar/tab bar), this
+/// is the base for popup percentage sizes and centering, matching tmux
+/// `display-popup -w/-h` and the documented "percentage of the terminal area".
+/// Unknown kinds are ignored, so old servers fall back to `surface_size`.
+pub const TERMINAL_SIZE_KIND: &str = "shell.terminal_size.v1";
+
+/// Build a client-to-server full-terminal-size control message.
+///
+/// `cols`/`rows` are the full outer terminal dimensions (including client
+/// chrome), not the pane surface. Send alongside every pane-surface resize
+/// and once after handshake so servers can size popups before first render.
+/// Old servers ignore the unknown kind and keep the surface-size fallback.
+pub fn terminal_size_control(cols: u16, rows: u16) -> super::ClientMessage {
+    let data = serde_json::to_string(&ClientSurfaceSize { cols, rows })
+        .unwrap_or_else(|_| format!(r#"{{"cols":{cols},"rows":{rows}}}"#));
+    super::ClientMessage::EndpointControl {
+        kind: TERMINAL_SIZE_KIND.into(),
+        data,
+    }
+}
 
 fn default_true() -> bool {
     true
@@ -38,6 +59,12 @@ pub struct EndpointClientHello {
     pub cell_width_px: u32,
     pub cell_height_px: u32,
     pub surface_size: ClientSurfaceSize,
+    /// Full outer terminal size in cells, when reported by newer clients.
+    ///
+    /// Popup percentages resolve against this full area; older hellos omit it
+    /// and servers fall back to `surface_size`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_size: Option<ClientSurfaceSize>,
     pub pixel_mouse: bool,
     pub direct_graphics: bool,
     pub endpoint_keybindings: bool,
@@ -147,6 +174,7 @@ mod tests {
             cell_width_px: 8,
             cell_height_px: 16,
             surface_size: ClientSurfaceSize { cols: 80, rows: 24 },
+            terminal_size: None,
             pixel_mouse: true,
             direct_graphics: false,
             endpoint_keybindings: false,
@@ -273,6 +301,55 @@ mod tests {
         value.as_object_mut().unwrap().remove("surface_active");
         let decoded: EndpointClientHello = serde_json::from_value(value).unwrap();
         assert!(decoded.surface_active);
+    }
+
+    #[test]
+    fn hello_terminal_size_is_optional_with_surface_fallback() {
+        // Old hellos omit full size → None (surface fallback for popups).
+        assert_eq!(hello().terminal_size, None);
+        let decoded: EndpointClientHello =
+            serde_json::from_value(serde_json::to_value(hello()).unwrap()).unwrap();
+        assert_eq!(decoded.terminal_size, None);
+
+        // New hellos carry full outer size alongside the pane surface.
+        let mut full = hello();
+        full.terminal_size = Some(ClientSurfaceSize {
+            cols: 106,
+            rows: 20,
+        });
+        let decoded: EndpointClientHello =
+            serde_json::from_value(serde_json::to_value(&full).unwrap()).unwrap();
+        assert_eq!(
+            decoded.terminal_size,
+            Some(ClientSurfaceSize {
+                cols: 106,
+                rows: 20
+            })
+        );
+
+        // Old servers ignore the unknown field and keep working.
+        let mut value = serde_json::to_value(&full).unwrap();
+        value.as_object_mut().unwrap().remove("terminal_size");
+        let decoded: EndpointClientHello = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.terminal_size, None);
+    }
+
+    #[test]
+    fn terminal_size_control_carries_full_outer_cells() {
+        let super::super::ClientMessage::EndpointControl { kind, data } =
+            terminal_size_control(106, 20)
+        else {
+            panic!("terminal size must use endpoint control");
+        };
+        assert_eq!(kind, TERMINAL_SIZE_KIND);
+        let size: ClientSurfaceSize = serde_json::from_str(&data).unwrap();
+        assert_eq!(
+            size,
+            ClientSurfaceSize {
+                cols: 106,
+                rows: 20
+            }
+        );
     }
 
     #[test]

@@ -256,6 +256,7 @@ pub(super) fn render_pane_surface(
     app: &mut app::App,
     target: Option<crate::ui::TabSurfaceTarget>,
     area: Rect,
+    popup_area: Rect,
     resize_panes: bool,
     show_popup: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
@@ -386,7 +387,7 @@ pub(super) fn render_pane_surface(
         })
         .collect();
     let popup = show_popup
-        .then(|| render_popup_surface(app, area, resize_panes, cell_size))
+        .then(|| render_popup_surface(app, popup_area, resize_panes, cell_size))
         .flatten();
     let (graphics, next_graphics_delivery) = crate::server::client_shell_graphics::collect(
         app,
@@ -414,6 +415,9 @@ fn render_popup_surface(
     resize_runtime: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> Option<Box<protocol::ClientShellPopupSurface>> {
+    // `area` is the full outer terminal area, not the pane surface. Popup
+    // percentages and centering resolve against the full area to match tmux
+    // `display-popup` and the documented "percentage of the terminal area".
     let popup = app.state.popup_pane.as_ref()?;
     let geometry = if resize_runtime {
         resize_popup_runtime(app, area, cell_size)?
@@ -457,6 +461,7 @@ pub(super) fn resize_popup_runtime(
     area: Rect,
     cell_size: crate::kitty_graphics::HostCellSize,
 ) -> Option<crate::popup_size::PopupResolvedGeometry> {
+    // `area` is the full outer terminal area (see `render_popup_surface`).
     let popup = app.state.popup_pane.as_ref()?;
     let geometry = crate::popup_size::resolve_popup_geometry(popup.width, popup.height, area)?;
     let runtime = app.terminal_runtimes.get(&popup.terminal_id)?;

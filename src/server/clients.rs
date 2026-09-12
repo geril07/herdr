@@ -135,6 +135,16 @@ pub(crate) struct ClientConnection {
     pub(crate) mode: ClientConnectionMode,
     /// The client's terminal size after clamping.
     pub(crate) terminal_size: (u16, u16),
+    /// Full outer terminal size in cells, when reported by newer clients.
+    ///
+    /// `terminal_size` is the pane surface without client chrome
+    /// (sidebar/tab bar) and drives tab layout. Popup percentages and
+    /// centering are documented as a percentage of the full terminal area
+    /// (matching tmux `display-popup`), so newer clients also report the
+    /// outer size via `shell.terminal_size.v1`. `None` means an older client
+    /// that only reports the surface; popup geometry falls back to
+    /// `terminal_size` for those connections.
+    pub(crate) full_terminal_size: Option<(u16, u16)>,
     /// Pixel size of one client terminal cell.
     pub(crate) cell_size: crate::kitty_graphics::HostCellSize,
     /// Monotonic activity stamp used to choose the fallback foreground client.
@@ -223,6 +233,7 @@ impl ClientConnection {
         Self {
             mode,
             terminal_size,
+            full_terminal_size: None,
             cell_size,
             last_activity,
             render_state: ClientRenderState::new(render_encoding),
@@ -256,6 +267,12 @@ impl ClientConnection {
 
     pub(crate) fn request_repaint(&mut self) {
         self.render_state.request_repaint();
+    }
+
+    /// Full outer terminal size for popup geometry, falling back to the pane
+    /// surface for older clients that predate `shell.terminal_size.v1`.
+    pub(crate) fn popup_base_size(&self) -> (u16, u16) {
+        self.full_terminal_size.unwrap_or(self.terminal_size)
     }
 
     pub(crate) fn track_shell_input(
