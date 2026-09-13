@@ -308,6 +308,7 @@ pub struct CustomCommandKeybind {
 pub struct NavigateKeybinds {
     pub workspace_up: ActionKeybinds,
     pub workspace_down: ActionKeybinds,
+    pub workspace_open: ActionKeybinds,
     pub pane_left: ActionKeybinds,
     pub pane_down: ActionKeybinds,
     pub pane_up: ActionKeybinds,
@@ -481,6 +482,7 @@ impl Config {
             navigate: NavigateKeybinds {
                 workspace_up: empty_action!(),
                 workspace_down: empty_action!(),
+                workspace_open: empty_action!(),
                 pane_left: empty_action!(),
                 pane_down: empty_action!(),
                 pane_up: empty_action!(),
@@ -608,6 +610,11 @@ impl Config {
             apply_navigate!(
                 keybinds.navigate.workspace_down,
                 navigate_workspace_down,
+                source
+            );
+            apply_navigate!(
+                keybinds.navigate.workspace_open,
+                navigate_workspace_open,
                 source
             );
             apply_navigate!(keybinds.navigate.pane_left, navigate_pane_left, source);
@@ -1832,6 +1839,7 @@ help = "prefix+ctrl+b"
 [keys]
 navigate_workspace_up = "j"
 navigate_workspace_down = "j"
+navigate_workspace_open = "o"
 navigate_pane_down = "ctrl+j"
 "#,
         )
@@ -1844,6 +1852,10 @@ navigate_pane_down = "ctrl+j"
             .workspace_up
             .matches_direct_key(&TerminalKey::new(KeyCode::Char('j'), KeyModifiers::empty())));
         assert!(keybinds.navigate.workspace_down.bindings.is_empty());
+        assert!(keybinds
+            .navigate
+            .workspace_open
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('o'), KeyModifiers::empty())));
         assert!(keybinds
             .navigate
             .pane_down
