@@ -94,6 +94,13 @@ pub(crate) fn keybind_help_groups(
                 ),
                 entry(
                     format!(
+                        "enter / {}",
+                        binding_label(&keybinds.navigate.workspace_open)
+                    ),
+                    "open workspace",
+                ),
+                entry(
+                    format!(
                         "{} / {} / {} / {} / left / right",
                         binding_label(&keybinds.navigate.pane_left),
                         binding_label(&keybinds.navigate.pane_down),
@@ -103,7 +110,6 @@ pub(crate) fn keybind_help_groups(
                     "move focus",
                 ),
                 entry("tab / shift+tab", "cycle pane"),
-                entry("enter", "open workspace"),
                 entry("1..9", "switch workspace"),
             ],
         ),
