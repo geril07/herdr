@@ -46,10 +46,7 @@ impl HeadlessServer {
                     let child_requests_mouse =
                         focused.is_some_and(|(runtime, _)| runtime.mouse_reporting_enabled());
                     let sgr_pixels = client.pixel_mouse
-                        && focused.is_some_and(|(runtime, pane_id)| {
-                            self.app.pane_graphics.active_for_pane(pane_id)
-                                && runtime.sgr_pixel_mouse_enabled()
-                        });
+                        && focused.is_some_and(|(runtime, _)| runtime.sgr_pixel_mouse_enabled());
                     Some((
                         client_id,
                         client.shell_surface_active
@@ -462,6 +459,16 @@ impl HeadlessServer {
 
         let mut broken_clients: Vec<u64> = Vec::new();
         for (client_id, (cols, rows), cell_size, _is_foreground, mode) in render_targets {
+            #[cfg(unix)]
+            if matches!(mode, ClientConnectionMode::TerminalObserve { .. })
+                && self
+                    .clients
+                    .get(&client_id)
+                    .is_some_and(|client| client.deferred_render() != DeferredRender::None)
+            {
+                // The writer-drained event schedules recovery, even if pane output stops.
+                continue;
+            }
             let area = Rect::new(0, 0, cols, rows);
             // Popup percentages resolve against the full outer terminal, not
             // the pane surface. Older clients that never reported a full size
