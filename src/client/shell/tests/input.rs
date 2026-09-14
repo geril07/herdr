@@ -676,3 +676,54 @@ fn russian_ctrl_word_erase_forwards_latin_ctrl_w() {
         }] if *modifiers == KeyModifiers::CONTROL.bits()
     ));
 }
+
+#[test]
+fn rename_tab_overlay_empty_input_sends_clear_for_default_fallback() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+        title: "rename tab",
+        input: "   ".into(),
+        replace_on_type: false,
+        target: ClientRenameTarget::Tab {
+            tab_id: "tab_1".into(),
+            auto_name: false,
+            original_name: "logs".into(),
+        },
+    }));
+    let mut outcome = ClientShellInput::default();
+    state.save_rename_overlay(&mut outcome);
+    assert!(state.overlay.is_none());
+    let method = outcome.actions.iter().find_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => Some(&request.method),
+        _ => None,
+    });
+    assert!(
+        matches!(
+            method,
+            Some(crate::api::schema::Method::TabRename(params))
+                if params.tab_id == "tab_1" && params.label.is_empty()
+        ),
+        "empty tab rename should send a clear, got {method:?}"
+    );
+}
+
+#[test]
+fn rename_tab_overlay_unchanged_auto_name_sends_nothing() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
+        title: "rename tab",
+        input: "1".into(),
+        replace_on_type: false,
+        target: ClientRenameTarget::Tab {
+            tab_id: "tab_1".into(),
+            auto_name: true,
+            original_name: "1".into(),
+        },
+    }));
+    let mut outcome = ClientShellInput::default();
+    state.save_rename_overlay(&mut outcome);
+    assert!(state.overlay.is_none());
+    assert!(outcome.actions.is_empty());
+}
