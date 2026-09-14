@@ -1410,7 +1410,14 @@ pub fn key_event_matches_combo(key: &KeyEvent, combo: KeyCombo) -> bool {
 }
 
 pub fn terminal_key_matches_combo(key: &TerminalKey, combo: KeyCombo) -> bool {
-    key_parts_match_combo(key.code, key.modifiers, key.shifted_codepoint, combo)
+    // Layout-independent `Ctrl`/`Super` shortcuts: `ctrl+ц` matches `ctrl+w`.
+    let normalized = key.clone().normalized_for_shortcut();
+    key_parts_match_combo(
+        normalized.code,
+        normalized.modifiers,
+        normalized.shifted_codepoint,
+        combo,
+    )
 }
 
 fn key_parts_match_combo(
@@ -1999,6 +2006,27 @@ navigate_pane_down = "ctrl+j"
             diag.contains("kept keys.navigate_workspace_up")
                 && diag.contains("disabled keys.navigate_workspace_down")
         }));
+    }
+
+    #[test]
+    fn ctrl_shortcuts_match_russian_layout_keys() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+navigate_pane_down = "ctrl+j"
+"#,
+        )
+        .unwrap();
+        let keybinds = config.keybinds();
+
+        assert!(keybinds
+            .navigate
+            .pane_down
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('о'), KeyModifiers::CONTROL)));
+        assert!(!keybinds
+            .navigate
+            .pane_down
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('о'), KeyModifiers::empty())));
     }
 
     #[test]
