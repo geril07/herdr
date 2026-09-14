@@ -173,6 +173,7 @@ pub(super) struct ShellHitMap {
     pub(super) mobile_max_scroll: usize,
     pub(super) global_launcher: Rect,
     pub(super) notification_toast: Rect,
+    pub(super) config_diagnostic_dismiss: Rect,
     pub(super) global_menu_rows: Vec<(Rect, usize)>,
     pub(super) context_menu_rows: Vec<(Rect, usize)>,
     pub(super) overlay_primary: Rect,
@@ -988,6 +989,7 @@ pub(crate) struct ClientShellState {
     pub(super) host_background: Option<crate::terminal_theme::RgbColor>,
     pub(super) local_config_diagnostic: Option<String>,
     pub(super) config_diagnostic: Option<String>,
+    pub(super) dismissed_config_diagnostic: Option<String>,
     pub(super) endpoint_error: Option<String>,
     pub(super) endpoint_error_deadline: Option<std::time::Instant>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
@@ -1147,6 +1149,7 @@ impl ClientShellState {
             host_appearance_explicit: false,
             host_background: None,
             config_diagnostic: local_config_diagnostic.clone(),
+            dismissed_config_diagnostic: None,
             local_config_diagnostic,
             endpoint_error: None,
             endpoint_error_deadline: None,
@@ -1372,10 +1375,6 @@ impl ClientShellState {
             }
             ClientShellKeybindingSource::RemoteLocal => false,
         };
-        self.config_diagnostic = super::config::merged_config_diagnostic(
-            self.local_config_diagnostic.as_deref(),
-            snapshot.config_diagnostic.as_deref(),
-        );
         let boot_changed = endpoint_boot_changed
             || self
                 .snapshot
@@ -1597,6 +1596,7 @@ impl ClientShellState {
             }
         }
         self.snapshot = Some(snapshot);
+        self.refresh_config_diagnostic();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {

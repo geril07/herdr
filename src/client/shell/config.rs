@@ -18,12 +18,33 @@ pub(super) fn merged_config_diagnostic(
 impl ClientShellState {
     pub(super) fn set_local_config_diagnostic(&mut self, diagnostic: Option<String>) {
         self.local_config_diagnostic = diagnostic;
-        self.config_diagnostic = merged_config_diagnostic(
+        self.refresh_config_diagnostic();
+    }
+
+    pub(super) fn refresh_config_diagnostic(&mut self) {
+        let merged = merged_config_diagnostic(
             self.local_config_diagnostic.as_deref(),
             self.snapshot
                 .as_deref()
                 .and_then(|snapshot| snapshot.config_diagnostic.as_deref()),
         );
+        if merged.is_none() {
+            self.dismissed_config_diagnostic = None;
+        }
+        // Dismiss is client-local: hide the exact text that was dismissed, show
+        // anything new. The server keeps reporting until the config is fixed.
+        self.config_diagnostic = match (&merged, &self.dismissed_config_diagnostic) {
+            (Some(merged), Some(dismissed)) if merged == dismissed => None,
+            _ => merged,
+        };
+    }
+
+    pub(crate) fn dismiss_config_diagnostic(&mut self, outcome: &mut ClientShellInput) {
+        if let Some(current) = self.config_diagnostic.take() {
+            self.dismissed_config_diagnostic = Some(current);
+            self.hits.config_diagnostic_dismiss = Rect::default();
+            outcome.repaint = true;
+        }
     }
 
     pub(super) fn persist_chrome_preferences(&mut self, outcome: &mut ClientShellInput) {

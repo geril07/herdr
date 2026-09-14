@@ -678,6 +678,13 @@ impl ClientShellState {
             self.navigate_workspace_id = None;
             outcome.repaint = true;
         }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && !self.hits.config_diagnostic_dismiss.is_empty()
+            && super::contains(self.hits.config_diagnostic_dismiss, point)
+        {
+            self.dismiss_config_diagnostic(outcome);
+            return;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::Onboarding)) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left)
                 && super::contains(self.hits.overlay_primary, point)
