@@ -2759,3 +2759,372 @@ fn navigator_expand_all_workspaces_with_e() {
     // Now both workspaces are expanded: 6 rows
     assert_eq!(row_count(&state), 6);
 }
+
+#[test]
+fn agent_picker_keybind_opens_overlay() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
+    // Send default prefix (ctrl+b) then 'a'
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('b'),
+        KeyModifiers::CONTROL,
+    ))]);
+    assert_eq!(state.mode, ClientShellMode::Prefix);
+
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('a'),
+        KeyModifiers::empty(),
+    ))]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::AgentPicker(_))
+    ));
+}
+
+#[test]
+fn agent_picker_selection_moves_with_jk_and_ctrl_np() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.agents = vec![
+        agent("agent 0", AgentStatus::Blocked, 3),
+        agent("agent 1", AgentStatus::Working, 2),
+        agent("agent 2", AgentStatus::Idle, 1),
+    ];
+    snap.agents[0].pane_id = "pane_1".into();
+    snap.agents[1].pane_id = "pane_2".into();
+    snap.agents[2].pane_id = "pane_3".into();
+    snap.panes = snap
+        .agents
+        .iter()
+        .map(|a| ClientShellPane {
+            pane_id: a.pane_id.clone(),
+            focused: a.pane_id == "pane_1",
+            ..snap.panes[0].clone()
+        })
+        .collect();
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+
+    state.open_agent_picker_overlay();
+
+    let selected = |state: &ClientShellState| {
+        let ClientShellOverlay::AgentPicker(picker) = state.overlay.as_ref().expect("agent picker")
+        else {
+            panic!("expected agent picker");
+        };
+        let rows = render::client_agent_picker_rows(
+            &state.endpoints,
+            &state.active_endpoint_id,
+            state.config.agent_panel_sort,
+            picker,
+        );
+        aggregate_navigation::agent_picker_selected_index(&rows, picker)
+    };
+
+    assert_eq!(selected(&state), Some(0));
+
+    let press = |state: &mut ClientShellState, code, modifiers| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))]);
+    };
+
+    // 'j' moves down
+    press(&mut state, KeyCode::Char('j'), KeyModifiers::empty());
+    assert_eq!(selected(&state), Some(1));
+
+    // Ctrl+n moves down
+    press(&mut state, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert_eq!(selected(&state), Some(2));
+
+    // 'k' moves up
+    press(&mut state, KeyCode::Char('k'), KeyModifiers::empty());
+    assert_eq!(selected(&state), Some(1));
+
+    // Ctrl+p moves up
+    press(&mut state, KeyCode::Char('p'), KeyModifiers::CONTROL);
+    assert_eq!(selected(&state), Some(0));
+
+    // Down and Up arrows
+    press(&mut state, KeyCode::Down, KeyModifiers::empty());
+    assert_eq!(selected(&state), Some(1));
+    press(&mut state, KeyCode::Up, KeyModifiers::empty());
+    assert_eq!(selected(&state), Some(0));
+}
+
+#[test]
+fn agent_picker_query_and_filter_narrows_agents() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.workspaces[0].label = "frontend".into();
+    let mut a0 = agent("compiler", AgentStatus::Blocked, 4);
+    a0.pane_id = "pane_1".into();
+    a0.title = Some("build error in parser".into());
+
+    let mut a1 = agent("linter", AgentStatus::Working, 3);
+    a1.pane_id = "pane_2".into();
+    a1.title = Some("checking types".into());
+
+    let mut a2 = agent("server", AgentStatus::Idle, 2);
+    a2.pane_id = "pane_3".into();
+    a2.title = Some("listening on 8080".into());
+
+    snap.agents = vec![a0, a1, a2];
+    snap.panes = snap
+        .agents
+        .iter()
+        .map(|a| ClientShellPane {
+            pane_id: a.pane_id.clone(),
+            focused: a.pane_id == "pane_1",
+            ..snap.panes[0].clone()
+        })
+        .collect();
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+
+    state.open_agent_picker_overlay();
+
+    let row_names = |state: &ClientShellState| {
+        let ClientShellOverlay::AgentPicker(picker) = state.overlay.as_ref().expect("agent picker")
+        else {
+            panic!("expected agent picker");
+        };
+        render::client_agent_picker_rows(
+            &state.endpoints,
+            &state.active_endpoint_id,
+            state.config.agent_panel_sort,
+            picker,
+        )
+        .into_iter()
+        .map(|r| r.agent_label)
+        .collect::<Vec<_>>()
+    };
+
+    assert_eq!(row_names(&state), vec!["compiler", "linter", "server"]);
+
+    let press = |state: &mut ClientShellState, code, modifiers| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))]);
+    };
+
+    // Filter by status when !search_focused: 'b' for Blocked
+    press(&mut state, KeyCode::Char('b'), KeyModifiers::empty());
+    assert_eq!(row_names(&state), vec!["compiler"]);
+
+    // Filter 'w' for Working
+    press(&mut state, KeyCode::Char('w'), KeyModifiers::empty());
+    assert_eq!(row_names(&state), vec!["linter"]);
+
+    // Filter 'i' for Idle
+    press(&mut state, KeyCode::Char('i'), KeyModifiers::empty());
+    assert_eq!(row_names(&state), vec!["server"]);
+
+    // 'F' clears filter
+    press(&mut state, KeyCode::Char('F'), KeyModifiers::empty());
+    assert_eq!(row_names(&state), vec!["compiler", "linter", "server"]);
+
+    // Focus search with '/' and search by title
+    press(&mut state, KeyCode::Char('/'), KeyModifiers::empty());
+    state.handle_input_bytes(b"parser");
+    assert_eq!(row_names(&state), vec!["compiler"]);
+
+    // Search by workspace label
+    if let Some(ClientShellOverlay::AgentPicker(picker)) = state.overlay.as_mut() {
+        picker.query = "frontend".into();
+    }
+    assert_eq!(row_names(&state), vec!["compiler", "linter", "server"]);
+
+    // Search by status string
+    if let Some(ClientShellOverlay::AgentPicker(picker)) = state.overlay.as_mut() {
+        picker.query = "working".into();
+    }
+    assert_eq!(row_names(&state), vec!["linter"]);
+}
+
+#[test]
+fn agent_picker_enter_activates_selected_agent_pane() {
+    let (mut state, endpoint_id) = state_with_scrollable_agents();
+    state.open_agent_picker_overlay();
+
+    // Select remote agent
+    if let Some(ClientShellOverlay::AgentPicker(picker)) = state.overlay.as_mut() {
+        picker.selected = Some((endpoint_id.clone(), "pane_1".into()));
+    }
+
+    let mut outcome = ClientShellInput::default();
+    state.accept_agent_picker_selection(&mut outcome);
+
+    assert!(matches!(
+        outcome.actions.as_slice(),
+        [ClientShellAction::ActivateEndpoint {
+            endpoint_id: activated,
+            target: Some(ClientEndpointFocusTarget::Pane(pane_id)),
+        }] if activated == &endpoint_id && pane_id == "pane_1"
+    ));
+    assert!(state.overlay.is_none());
+
+    // Also test via Enter key event
+    state.open_agent_picker_overlay();
+    assert!(state.overlay.is_some());
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Enter,
+        KeyModifiers::empty(),
+    ))]);
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn agent_picker_renders_header_rows_and_footer() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.workspaces[0].label = "main".into();
+    let mut a = agent("pi", AgentStatus::Working, 1);
+    a.pane_id = "pane_1".into();
+    a.tokens = vec![(
+        crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN.into(),
+        (super::super::agent_sidebar::current_unix_ms().saturating_sub(120_000)).to_string(),
+    )];
+    snap.agents = vec![a];
+    snap.panes = vec![ClientShellPane {
+        pane_id: "pane_1".into(),
+        focused: true,
+        ..snap.panes[0].clone()
+    }];
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_agent_picker_overlay();
+
+    let frame = state.compose(106, 30).expect("agent picker frame");
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| row.iter().map(|c| c.symbol.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(text.contains("search agents"));
+    assert!(text.contains("1 agent"));
+    assert!(text.contains("pi"));
+    assert!(text.contains("main · 1"));
+    assert!(text.contains("2m"));
+    assert!(text.contains("filter F/b/w/i/d"));
+}
+
+#[test]
+fn agent_picker_shift_f_clears_filter_and_reselects_current_agent() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    let mut a0 = agent("compiler", AgentStatus::Blocked, 4);
+    a0.pane_id = "pane_1".into();
+    let mut a1 = agent("linter", AgentStatus::Working, 3);
+    a1.pane_id = "pane_2".into();
+    let mut a2 = agent("server", AgentStatus::Idle, 2);
+    a2.pane_id = "pane_3".into();
+
+    snap.agents = vec![a0, a1, a2];
+    snap.focused_pane_id = Some("pane_2".into());
+    snap.panes = snap
+        .agents
+        .iter()
+        .map(|a| ClientShellPane {
+            pane_id: a.pane_id.clone(),
+            focused: a.pane_id == "pane_2",
+            ..snap.panes[0].clone()
+        })
+        .collect();
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+
+    state.open_agent_picker_overlay();
+
+    let selected_pane = |state: &ClientShellState| {
+        let ClientShellOverlay::AgentPicker(picker) = state.overlay.as_ref().expect("agent picker")
+        else {
+            panic!("expected agent picker");
+        };
+        picker.selected.as_ref().map(|(_, pane_id)| pane_id.clone())
+    };
+
+    assert_eq!(selected_pane(&state), Some("pane_2".into()));
+
+    let press = |state: &mut ClientShellState, code, modifiers| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))]);
+    };
+
+    // Filter 'i' for Idle (only pane_3 matches)
+    press(&mut state, KeyCode::Char('i'), KeyModifiers::empty());
+    state.move_agent_picker_selection(0);
+    assert_eq!(selected_pane(&state), Some("pane_3".into()));
+
+    // Lowercase 'f' without Shift does NOT clear filter
+    press(&mut state, KeyCode::Char('f'), KeyModifiers::empty());
+    assert_eq!(selected_pane(&state), Some("pane_3".into()));
+
+    // Uppercase 'F' clears filter and re-selects current agent (pane_2)
+    press(&mut state, KeyCode::Char('F'), KeyModifiers::empty());
+    assert_eq!(selected_pane(&state), Some("pane_2".into()));
+
+    // Also verify with Char('f') and Shift modifier
+    press(&mut state, KeyCode::Char('b'), KeyModifiers::empty());
+    state.move_agent_picker_selection(0);
+    assert_eq!(selected_pane(&state), Some("pane_1".into()));
+
+    press(&mut state, KeyCode::Char('f'), KeyModifiers::SHIFT);
+    assert_eq!(selected_pane(&state), Some("pane_2".into()));
+}
+
+#[test]
+fn agent_picker_respects_agent_panel_sort_config() {
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snap = snapshot();
+    let mut a0 = agent("idle-agent", AgentStatus::Idle, 1);
+    a0.pane_id = "pane_1".into();
+    let mut a1 = agent("blocked-agent", AgentStatus::Blocked, 2);
+    a1.pane_id = "pane_2".into();
+
+    snap.agents = vec![a0, a1];
+    snap.panes = snap
+        .agents
+        .iter()
+        .map(|a| ClientShellPane {
+            pane_id: a.pane_id.clone(),
+            focused: a.pane_id == "pane_1",
+            ..snap.panes[0].clone()
+        })
+        .collect();
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+
+    state.open_agent_picker_overlay();
+
+    let row_names = |state: &ClientShellState| {
+        let ClientShellOverlay::AgentPicker(picker) = state.overlay.as_ref().expect("agent picker")
+        else {
+            panic!("expected agent picker");
+        };
+        render::client_agent_picker_rows(
+            &state.endpoints,
+            &state.active_endpoint_id,
+            state.config.agent_panel_sort,
+            picker,
+        )
+        .into_iter()
+        .map(|r| r.agent_label)
+        .collect::<Vec<_>>()
+    };
+
+    // Under Spaces sort, preserves order: idle-agent first
+    assert_eq!(row_names(&state), vec!["idle-agent", "blocked-agent"]);
+
+    // Change sort to Priority
+    state.config.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+    // Under Priority sort, Blocked comes before Idle
+    assert_eq!(row_names(&state), vec!["blocked-agent", "idle-agent"]);
+}

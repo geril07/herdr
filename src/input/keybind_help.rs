@@ -120,6 +120,7 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.workspace_picker),
                     "workspace navigation",
                 ),
+                entry(binding_label(&keybinds.agent_picker), "agent picker"),
                 entry(binding_label(&keybinds.goto), "session navigator"),
                 entry(binding_label(&keybinds.new_workspace), "new workspace"),
                 entry(binding_label(&keybinds.new_worktree), "new worktree"),

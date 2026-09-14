@@ -412,7 +412,10 @@ pub(super) fn current_unix_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-fn format_status_elapsed(now_unix_ms: u64, status_changed_unix_ms: u64) -> Option<String> {
+pub(super) fn format_status_elapsed(
+    now_unix_ms: u64,
+    status_changed_unix_ms: u64,
+) -> Option<String> {
     let elapsed_minutes = now_unix_ms.checked_sub(status_changed_unix_ms)? / 60_000;
     if elapsed_minutes == 0 {
         return Some("<1m".into());

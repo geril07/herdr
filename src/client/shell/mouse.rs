@@ -1672,6 +1672,54 @@ impl ClientShellState {
             }
             return;
         }
+        if matches!(self.overlay, Some(ClientShellOverlay::AgentPicker(_))) {
+            let row_hit = self
+                .hits
+                .agent_picker_rows
+                .iter()
+                .find(|(rect, _, _)| super::contains(*rect, point))
+                .cloned();
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if let Some((_, endpoint_id, pane_id)) = row_hit {
+                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
+                        {
+                            picker.selected = Some((endpoint_id, pane_id));
+                        }
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if super::contains(self.hits.agent_picker_search, point) {
+                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
+                        {
+                            picker.search_focused = true;
+                            picker.filter = None;
+                        }
+                        outcome.repaint = true;
+                    } else if let Some((_, endpoint_id, pane_id)) = row_hit {
+                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
+                        {
+                            picker.selected = Some((endpoint_id, pane_id));
+                        }
+                        self.accept_agent_picker_selection(outcome);
+                    } else if !super::contains(self.hits.agent_picker_popup, point) {
+                        self.overlay = None;
+                        outcome.repaint = true;
+                    }
+                }
+                MouseEventKind::ScrollUp => {
+                    self.move_agent_picker_selection(-3);
+                    outcome.repaint = true;
+                }
+                MouseEventKind::ScrollDown => {
+                    self.move_agent_picker_selection(3);
+                    outcome.repaint = true;
+                }
+                _ => {}
+            }
+            return;
+        }
         if self.overlay.is_some() {
             if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
                 return;
