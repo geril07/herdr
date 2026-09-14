@@ -285,7 +285,10 @@ impl ClientShellState {
     }
 
     pub(super) fn toggle_selected_navigator_workspace(&mut self) {
-        let workspace_key = self.overlay.as_ref().and_then(|overlay| match overlay {
+        // (endpoint, workspace, flip). Workspace rows flip their own expansion;
+        // tab/pane rows collapse the parent workspace. Selection always ends
+        // up on the workspace row so it never jumps to the top of the list.
+        let toggle = self.overlay.as_ref().and_then(|overlay| match overlay {
             ClientShellOverlay::Navigator(navigator) => {
                 let rows = render::client_navigator_rows(
                     &self.endpoints,
@@ -297,20 +300,54 @@ impl ClientShellState {
                         ClientNavigatorTarget::Workspace {
                             endpoint_id,
                             workspace_id,
-                        } => Some((endpoint_id, workspace_id)),
+                        } => Some((endpoint_id, workspace_id, true)),
+                        ClientNavigatorTarget::Tab {
+                            endpoint_id,
+                            tab_id,
+                        } => self
+                            .endpoints
+                            .iter()
+                            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                            .and_then(|endpoint| endpoint.snapshot.as_deref())
+                            .and_then(|snapshot| {
+                                snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)
+                            })
+                            .map(|tab| (endpoint_id, tab.workspace_id.clone(), false)),
+                        ClientNavigatorTarget::Pane {
+                            endpoint_id,
+                            pane_id,
+                        } => self
+                            .endpoints
+                            .iter()
+                            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                            .and_then(|endpoint| endpoint.snapshot.as_deref())
+                            .and_then(|snapshot| {
+                                snapshot.panes.iter().find(|pane| pane.pane_id == pane_id)
+                            })
+                            .map(|pane| (endpoint_id, pane.workspace_id.clone(), false)),
                         _ => None,
                     },
                 )
             }
             _ => None,
         });
-        if let (Some(workspace_key), Some(ClientShellOverlay::Navigator(navigator))) =
-            (workspace_key, self.overlay.as_mut())
+        if let (
+            Some((endpoint_id, workspace_id, flip)),
+            Some(ClientShellOverlay::Navigator(navigator)),
+        ) = (toggle, self.overlay.as_mut())
         {
-            if !navigator.expanded_workspaces.remove(&workspace_key) {
-                navigator.expanded_workspaces.insert(workspace_key);
+            let key = (endpoint_id.clone(), workspace_id.clone());
+            if flip {
+                if !navigator.expanded_workspaces.remove(&key) {
+                    navigator.expanded_workspaces.insert(key);
+                }
+            } else {
+                navigator.expanded_workspaces.remove(&key);
             }
-            navigator.selected = None;
+            navigator.selected = Some(ClientNavigatorTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+            });
             navigator.scroll = 0;
         }
     }
