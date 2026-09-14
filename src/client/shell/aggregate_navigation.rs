@@ -450,3 +450,146 @@ pub(super) fn selected_navigator_target(
 ) -> Option<ClientNavigatorTarget> {
     navigator_selected_index(rows, navigator).map(|index| rows[index].target.clone())
 }
+
+#[derive(Clone, Debug)]
+pub(super) struct ClientAgentPickerRow {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) pane_id: String,
+    pub(super) agent_label: String,
+    pub(super) title: Option<String>,
+    pub(super) status: crate::api::schema::AgentStatus,
+    pub(super) status_elapsed: Option<String>,
+    pub(super) workspace_tab: String,
+    pub(super) current: bool,
+    pub(super) stale: bool,
+}
+
+pub(super) fn agent_picker_rows(
+    endpoints: &[ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+    sort: crate::config::AgentPanelSortConfig,
+    picker: &ClientAgentPickerOverlay,
+) -> Vec<ClientAgentPickerRow> {
+    let query = picker.query.trim().to_lowercase();
+    let filter = |status| match picker.filter {
+        Some(ClientNavigatorFilter::Blocked) => status == crate::api::schema::AgentStatus::Blocked,
+        Some(ClientNavigatorFilter::Working) => status == crate::api::schema::AgentStatus::Working,
+        Some(ClientNavigatorFilter::Idle) => status == crate::api::schema::AgentStatus::Idle,
+        Some(ClientNavigatorFilter::Done) => status == crate::api::schema::AgentStatus::Done,
+        None => true,
+    };
+    let now_unix_ms = super::agent_sidebar::current_unix_ms();
+    let federated = endpoints.len() > 1;
+    let aggregate = aggregate_agent_rows(endpoints, active_endpoint_id, sort);
+
+    let mut rows = Vec::new();
+    for row in aggregate {
+        let status = row.agent.agent_status;
+        if !filter(status) {
+            continue;
+        }
+        let snapshot = row.endpoint.snapshot;
+        let pane = snapshot
+            .panes
+            .iter()
+            .find(|p| p.pane_id == row.agent.pane_id);
+        let workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|w| w.workspace_id == row.agent.workspace_id);
+        let tab = snapshot.tabs.iter().find(|t| t.tab_id == row.agent.tab_id);
+
+        let workspace_label = workspace.map(|w| w.label.as_str()).unwrap_or("");
+        let tab_label = tab.map(|t| t.label.as_str()).unwrap_or("");
+
+        let workspace_tab = if federated {
+            format!(
+                "{} · {} · {}",
+                row.endpoint.label, workspace_label, tab_label
+            )
+        } else {
+            format!("{} · {}", workspace_label, tab_label)
+        };
+
+        let agent_label = row
+            .agent
+            .name
+            .clone()
+            .or_else(|| row.agent.display_agent.clone())
+            .or_else(|| row.agent.agent.clone())
+            .or_else(|| pane.and_then(|p| p.label.clone()))
+            .or_else(|| row.agent.title.clone())
+            .unwrap_or_else(|| format!("agent {}", row.agent.pane_id));
+
+        let title = row.agent.title.clone();
+
+        let status_elapsed = row
+            .agent
+            .tokens
+            .iter()
+            .find(|(key, _)| key == crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN)
+            .and_then(|(_, value)| value.parse::<u64>().ok())
+            .and_then(|status_changed_unix_ms| {
+                super::agent_sidebar::format_status_elapsed(now_unix_ms, status_changed_unix_ms)
+            });
+
+        let text = |value: &str| value.to_lowercase().contains(&query);
+        let matches_query = query.is_empty()
+            || text(&agent_label)
+            || row.agent.name.as_deref().is_some_and(text)
+            || row.agent.display_agent.as_deref().is_some_and(text)
+            || row.agent.agent.as_deref().is_some_and(text)
+            || row.agent.title.as_deref().is_some_and(text)
+            || row.agent.terminal_title.as_deref().is_some_and(text)
+            || row
+                .agent
+                .terminal_title_stripped
+                .as_deref()
+                .is_some_and(text)
+            || pane.and_then(|p| p.label.as_deref()).is_some_and(text)
+            || status_text(status).contains(&query)
+            || text(workspace_label)
+            || text(tab_label)
+            || (federated && text(row.endpoint.label));
+
+        if !matches_query {
+            continue;
+        }
+
+        let current = row.endpoint.endpoint_id == active_endpoint_id
+            && snapshot.focused_pane_id.as_deref() == Some(&row.agent.pane_id);
+
+        rows.push(ClientAgentPickerRow {
+            endpoint_id: row.endpoint.endpoint_id.clone(),
+            pane_id: row.agent.pane_id.clone(),
+            agent_label,
+            title,
+            status,
+            status_elapsed,
+            workspace_tab,
+            current,
+            stale: row.endpoint.stale(),
+        });
+    }
+    rows
+}
+
+pub(super) fn agent_picker_selected_index(
+    rows: &[ClientAgentPickerRow],
+    picker: &ClientAgentPickerOverlay,
+) -> Option<usize> {
+    match picker.selected.as_ref() {
+        Some((endpoint_id, pane_id)) => rows
+            .iter()
+            .position(|row| &row.endpoint_id == endpoint_id && &row.pane_id == pane_id),
+        None => (!rows.is_empty()).then_some(0),
+    }
+}
+
+pub(super) fn selected_agent_picker_target(
+    rows: &[ClientAgentPickerRow],
+    picker: &ClientAgentPickerOverlay,
+) -> Option<(ClientEndpointId, String)> {
+    agent_picker_selected_index(rows, picker)
+        .map(|index| (rows[index].endpoint_id.clone(), rows[index].pane_id.clone()))
+}

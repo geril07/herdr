@@ -13,6 +13,9 @@ pub(crate) struct OverlayRender {
     pub(crate) navigator_popup: Rect,
     pub(crate) navigator_search: Rect,
     pub(crate) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
+    pub(crate) agent_picker_popup: Rect,
+    pub(crate) agent_picker_search: Rect,
+    pub(crate) agent_picker_rows: Vec<(Rect, ClientEndpointId, String)>,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
     pub(crate) help_popup: Rect,
@@ -37,12 +40,14 @@ pub(crate) fn render_client_overlay(
     s: &ClientShellSnapshot,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
-    k: &LiveKeybindConfig,
-    p: &Palette,
+    config: &ClientShellConfig,
 ) -> Option<OverlayRender> {
+    let p = &config.palette;
+    let k = &config.keybinds;
     if !matches!(
         o,
         ClientShellOverlay::Navigator(_)
+            | ClientShellOverlay::AgentPicker(_)
             | ClientShellOverlay::ContextMenu(_)
             | ClientShellOverlay::GlobalMenu(_)
     ) {
@@ -65,6 +70,14 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::Navigator(v) => {
             render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
         }
+        ClientShellOverlay::AgentPicker(v) => render_agent_picker_overlay(
+            b,
+            v,
+            endpoints,
+            active_endpoint_id,
+            config.agent_panel_sort,
+            p,
+        ),
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
         }
@@ -942,6 +955,204 @@ fn render_navigator_overlay(
         worktree_rows: Vec::new(),
         cursor: n.search_focused.then(|| crate::protocol::CursorState {
             x: i.x + 3 + display_width(&n.query),
+            y: i.y,
+            visible: true,
+            shape: 0,
+        }),
+        ..OverlayRender::default()
+    })
+}
+
+fn render_agent_picker_overlay(
+    b: &mut Buffer,
+    picker: &ClientAgentPickerOverlay,
+    endpoints: &[ClientShellEndpoint],
+    active_endpoint_id: &ClientEndpointId,
+    sort: crate::config::AgentPanelSortConfig,
+    p: &Palette,
+) -> Option<OverlayRender> {
+    let a = b.area;
+    let mx = (a.width / 16).max(2);
+    let my = (a.height / 10).max(1);
+    let q = Rect::new(
+        a.x + mx,
+        a.y + my,
+        a.width.saturating_sub(mx * 2).max(4),
+        a.height.saturating_sub(my * 2).max(4),
+    );
+    let i = panel(b, q, p.accent, p.panel_bg)?;
+    let rows =
+        super::aggregate_navigation::agent_picker_rows(endpoints, active_endpoint_id, sort, picker);
+    let search = if picker.search_focused {
+        format!(" / {}", picker.query)
+    } else if let Some(f) = picker.filter {
+        format!(
+            " / {}",
+            match f {
+                ClientNavigatorFilter::Blocked => "blocked",
+                ClientNavigatorFilter::Working => "working",
+                ClientNavigatorFilter::Idle => "idle",
+                ClientNavigatorFilter::Done => "done",
+            }
+        )
+    } else if picker.query.is_empty() {
+        " / search agents".to_owned()
+    } else {
+        format!(" / {}", picker.query)
+    };
+    put_text(
+        b,
+        i.x,
+        i.y,
+        i.width,
+        &search,
+        Style::default()
+            .fg(if picker.search_focused {
+                p.text
+            } else {
+                p.overlay0
+            })
+            .bg(p.panel_bg),
+    );
+    let count_text = if rows.len() == 1 {
+        "1 agent".to_owned()
+    } else {
+        format!("{} agents", rows.len())
+    };
+    put_right_text(
+        b,
+        i,
+        i.y,
+        &count_text,
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    put_text(
+        b,
+        i.x,
+        i.y + 1,
+        i.width,
+        &"─".repeat(i.width as usize),
+        Style::default().fg(p.surface1).bg(p.panel_bg),
+    );
+    let body = Rect::new(i.x, i.y + 2, i.width, i.height.saturating_sub(4));
+    let selected =
+        super::aggregate_navigation::agent_picker_selected_index(&rows, picker).unwrap_or(0);
+    let max = rows.len().saturating_sub(body.height as usize);
+    let scroll = picker
+        .scroll
+        .max(selected.saturating_sub(body.height.saturating_sub(1) as usize))
+        .min(selected)
+        .min(max);
+    let mut row_hits = Vec::new();
+    for (ix, r) in rows.iter().enumerate().take(scroll + body.height as usize) {
+        if ix < scroll {
+            continue;
+        }
+        let rect = Rect::new(body.x, body.y + (ix - scroll) as u16, body.width, 1);
+        row_hits.push((rect, r.endpoint_id.clone(), r.pane_id.clone()));
+        let st = if r.stale {
+            Style::default()
+                .fg(p.overlay0)
+                .bg(if ix == selected {
+                    p.surface0
+                } else {
+                    p.panel_bg
+                })
+                .add_modifier(Modifier::DIM)
+        } else if ix == selected {
+            Style::default()
+                .fg(contrast(p))
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(if r.current { p.text } else { p.subtext0 })
+                .bg(p.panel_bg)
+        };
+        b.set_style(rect, st);
+
+        let current = if r.current { "◆ " } else { "" };
+        let status = status_dot(r.status);
+        let label = format!(" {current}{status} {}", r.agent_label);
+        put_text(b, rect.x, rect.y, rect.width, &label, st);
+
+        if !r.stale && ix != selected {
+            let prefix = format!(" {current}");
+            let status_style = Style::default()
+                .fg(status_color(r.status, p))
+                .bg(p.panel_bg);
+            put_text(
+                b,
+                rect.x.saturating_add(display_width(&prefix)),
+                rect.y,
+                display_width(status),
+                status,
+                status_style,
+            );
+        }
+
+        let meta = match &r.status_elapsed {
+            Some(elapsed) => format!("{} · {}", r.workspace_tab, elapsed),
+            None => r.workspace_tab.clone(),
+        };
+        if !meta.is_empty() {
+            let label_width = display_width(&label).min(rect.width);
+            let meta_rect = Rect::new(
+                rect.x.saturating_add(label_width).saturating_add(1),
+                rect.y,
+                rect.width.saturating_sub(label_width.saturating_add(1)),
+                1,
+            );
+            put_right_text(b, meta_rect, rect.y, &meta, st);
+        }
+    }
+    let dy = i.bottom() - 2;
+    if let Some(r) = rows.get(selected) {
+        let detail = match (&r.title, &r.status_elapsed) {
+            (Some(title), Some(elapsed)) if title != &r.agent_label => {
+                format!(
+                    " {} · {} ({}) · {}",
+                    r.agent_label, title, elapsed, r.workspace_tab
+                )
+            }
+            (Some(title), None) if title != &r.agent_label => {
+                format!(" {} · {} · {}", r.agent_label, title, r.workspace_tab)
+            }
+            (_, Some(elapsed)) => {
+                format!(" {} · {} · {}", r.agent_label, elapsed, r.workspace_tab)
+            }
+            _ => {
+                format!(" {} · {}", r.agent_label, r.workspace_tab)
+            }
+        };
+        put_text(
+            b,
+            i.x,
+            dy,
+            i.width,
+            &detail,
+            Style::default().fg(p.overlay0).bg(p.panel_bg),
+        );
+    }
+    put_text(
+        b,
+        i.x,
+        i.bottom() - 1,
+        i.width,
+        if picker.search_focused {
+            " search type · move ↑↓/ctrl+n/p · open enter · back esc"
+        } else {
+            " move j/k/ctrl+n/p · filter F/b/w/i/d · search / · open enter · close esc"
+        },
+        Style::default().fg(p.overlay0).bg(p.panel_bg),
+    );
+    Some(OverlayRender {
+        area: q,
+        agent_picker_popup: q,
+        agent_picker_search: Rect::new(i.x, i.y, i.width, 1),
+        agent_picker_rows: row_hits,
+        cursor: picker.search_focused.then(|| crate::protocol::CursorState {
+            x: i.x + 3 + display_width(&picker.query),
             y: i.y,
             visible: true,
             shape: 0,

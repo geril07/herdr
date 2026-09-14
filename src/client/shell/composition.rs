@@ -656,8 +656,7 @@ impl ClientShellState {
                     snapshot,
                     &self.endpoints,
                     &self.active_endpoint_id,
-                    &self.config.keybinds,
-                    &self.config.palette,
+                    &self.config,
                 )?;
                 occlusion.cover(rendered.area);
                 self.hits.overlay_primary = rendered.primary;
@@ -666,6 +665,9 @@ impl ClientShellState {
                 self.hits.navigator_popup = rendered.navigator_popup;
                 self.hits.navigator_search = rendered.navigator_search;
                 self.hits.navigator_rows = rendered.navigator_rows;
+                self.hits.agent_picker_popup = rendered.agent_picker_popup;
+                self.hits.agent_picker_search = rendered.agent_picker_search;
+                self.hits.agent_picker_rows = rendered.agent_picker_rows;
                 self.hits.worktree_search = rendered.worktree_search;
                 self.hits.worktree_rows = rendered.worktree_rows;
                 self.hits.help_popup = rendered.help_popup;
