@@ -1901,6 +1901,55 @@ fn navigator_search_ctrl_w_deletes_word_back() {
 }
 
 #[test]
+fn navigator_filter_matches_only_visible_rows() {
+    let mut config = Config::default();
+    config.ui.navigator_start_expanded = false;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let set_query = |state: &mut ClientShellState, query: &str| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_mut().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        navigator.query = query.into();
+    };
+    let labels = |state: &ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator)
+            .iter()
+            .map(|row| row.label.clone())
+            .collect::<Vec<_>>()
+    };
+    // A pane-only match stays hidden while its workspace is collapsed.
+    set_query(&mut state, "pane 1");
+    assert!(labels(&state).is_empty());
+    // Workspace label and branch matches show the single workspace row.
+    set_query(&mut state, "client-shell");
+    assert_eq!(labels(&state), vec!["client-shell".to_owned()]);
+    set_query(&mut state, "main");
+    assert_eq!(labels(&state), vec!["client-shell".to_owned()]);
+    // An expanded workspace still filters its children as before.
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char(' '),
+        KeyModifiers::empty(),
+    ))]);
+    set_query(&mut state, "pane 1");
+    assert_eq!(
+        labels(&state),
+        vec![
+            "client-shell".to_owned(),
+            "1".to_owned(),
+            "pane 1".to_owned()
+        ]
+    );
+}
+
+#[test]
 fn navigator_keeps_saved_machine_visible_before_metadata_arrives() {
     let (mut state, endpoint_id) = state_with_remote();
     let endpoint = state
