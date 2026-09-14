@@ -1700,6 +1700,7 @@ fn navigator_uses_machine_parents_only_for_federated_clients() {
     assert_eq!(rows.iter().filter(|row| row.current).count(), 1);
 
     let frame = state.compose(106, 30).expect("federated navigator");
+    assert_eq!(state.hits.navigator_popup.width, 84);
     for (rect, target) in &state.hits.navigator_rows {
         let expected = match target {
             ClientNavigatorTarget::Machine { .. } => " ▾ ",
@@ -2998,6 +2999,7 @@ fn agent_picker_renders_header_rows_and_footer() {
     state.open_agent_picker_overlay();
 
     let frame = state.compose(106, 30).expect("agent picker frame");
+    assert_eq!(state.hits.agent_picker_popup.width, 76);
     let text = frame
         .cells
         .chunks(frame.width as usize)

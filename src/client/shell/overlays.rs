@@ -730,15 +730,7 @@ fn render_navigator_overlay(
     active_endpoint_id: &ClientEndpointId,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let a = b.area;
-    let mx = (a.width / 16).max(2);
-    let my = (a.height / 10).max(1);
-    let q = Rect::new(
-        a.x + mx,
-        a.y + my,
-        a.width.saturating_sub(mx * 2).max(4),
-        a.height.saturating_sub(my * 2).max(4),
-    );
+    let q = popup(b.area, 84, (b.area.height * 75 / 100).clamp(16, 26))?;
     let i = panel(b, q, p.accent, p.panel_bg)?;
     let rows = super::aggregate_navigation::navigator_rows(endpoints, active_endpoint_id, n);
     let search = if n.search_focused {
@@ -971,15 +963,7 @@ fn render_agent_picker_overlay(
     sort: crate::config::AgentPanelSortConfig,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let a = b.area;
-    let mx = (a.width / 16).max(2);
-    let my = (a.height / 10).max(1);
-    let q = Rect::new(
-        a.x + mx,
-        a.y + my,
-        a.width.saturating_sub(mx * 2).max(4),
-        a.height.saturating_sub(my * 2).max(4),
-    );
+    let q = popup(b.area, 76, (b.area.height * 65 / 100).clamp(14, 22))?;
     let i = panel(b, q, p.accent, p.panel_bg)?;
     let rows =
         super::aggregate_navigation::agent_picker_rows(endpoints, active_endpoint_id, sort, picker);
@@ -1073,7 +1057,21 @@ fn render_agent_picker_overlay(
 
         let current = if r.current { "◆ " } else { "" };
         let status = status_dot(r.status);
-        let label = format!(" {current}{status} {}", r.agent_label);
+        let elapsed_suffix = match &r.status_elapsed {
+            Some(elapsed) => format!(" · {elapsed}"),
+            None => String::new(),
+        };
+        let ws_width = display_width(&r.workspace_tab);
+        let ws_col = 16u16;
+        let spacing = if ws_width < ws_col {
+            " ".repeat((ws_col - ws_width + 2) as usize)
+        } else {
+            "  ".to_string()
+        };
+        let label = format!(
+            " {current}{status} {}{spacing}{}{elapsed_suffix}",
+            r.workspace_tab, r.agent_label
+        );
         put_text(b, rect.x, rect.y, rect.width, &label, st);
 
         if !r.stale && ix != selected {
@@ -1090,39 +1088,24 @@ fn render_agent_picker_overlay(
                 status_style,
             );
         }
-
-        let meta = match &r.status_elapsed {
-            Some(elapsed) => format!("{} · {}", r.workspace_tab, elapsed),
-            None => r.workspace_tab.clone(),
-        };
-        if !meta.is_empty() {
-            let label_width = display_width(&label).min(rect.width);
-            let meta_rect = Rect::new(
-                rect.x.saturating_add(label_width).saturating_add(1),
-                rect.y,
-                rect.width.saturating_sub(label_width.saturating_add(1)),
-                1,
-            );
-            put_right_text(b, meta_rect, rect.y, &meta, st);
-        }
     }
     let dy = i.bottom() - 2;
     if let Some(r) = rows.get(selected) {
         let detail = match (&r.title, &r.status_elapsed) {
             (Some(title), Some(elapsed)) if title != &r.agent_label => {
                 format!(
-                    " {} · {} ({}) · {}",
-                    r.agent_label, title, elapsed, r.workspace_tab
+                    " {} · {} · {} ({})",
+                    r.workspace_tab, r.agent_label, title, elapsed
                 )
             }
             (Some(title), None) if title != &r.agent_label => {
-                format!(" {} · {} · {}", r.agent_label, title, r.workspace_tab)
+                format!(" {} · {} · {}", r.workspace_tab, r.agent_label, title)
             }
             (_, Some(elapsed)) => {
-                format!(" {} · {} · {}", r.agent_label, elapsed, r.workspace_tab)
+                format!(" {} · {} · {}", r.workspace_tab, r.agent_label, elapsed)
             }
             _ => {
-                format!(" {} · {}", r.agent_label, r.workspace_tab)
+                format!(" {} · {}", r.workspace_tab, r.agent_label)
             }
         };
         put_text(
