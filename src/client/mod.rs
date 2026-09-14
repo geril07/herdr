@@ -2092,7 +2092,8 @@ async fn run_client_loop(
                         let (effects, notification_repaint) = shell.tick_notifications(now);
                         outcome.repaint |= notification_repaint
                             | shell.tick_copy_feedback(now)
-                            | shell.tick_endpoint_error(now);
+                            | shell.tick_endpoint_error(now)
+                            | shell.tick_status_elapsed();
                         let frame = outcome
                             .repaint
                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))

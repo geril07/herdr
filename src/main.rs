@@ -348,15 +348,16 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
-# Expanded agent rows. Built-ins are state_icon, state_text, machine, workspace, tab,
-# pane, agent, terminal_title, and terminal_title_stripped.
+# Expanded agent rows. Built-ins are state_icon, state_text, state_elapsed, machine,
+# workspace, tab, pane, agent, terminal_title, and terminal_title_stripped.
+# state_elapsed shows time in the current status with minute precision.
 # Custom values reported through pane metadata use a $name token.
 # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
 # Omitted style fields preserve the contextual default.
 # [ui.sidebar.agents]
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
-# rows = [["state_icon", "machine", "workspace", "tab"], ["agent"]]
+# rows = [["state_icon", "machine", "workspace", "tab"], ["agent", "state_elapsed"]]
 # Optional canonical agent IDs replace the default rows for matching agents.
 # [ui.sidebar.agents.rows_by_agent]
 # claude = [["state_icon", "machine", "workspace", "tab"], ["terminal_title_stripped"], ["agent"]]

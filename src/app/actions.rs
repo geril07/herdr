@@ -1,7 +1,7 @@
 //! Pure state mutations on AppState.
 //! These don't need channels, async, or PTY runtime.
 
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use tracing::warn;
 
@@ -18,6 +18,14 @@ use super::state::{
     AgentNotificationDelivery, AppState, Mode, PaneFocusTarget, PendingAgentNotification,
     ToastKind, ToastNotification, ToastTarget,
 };
+
+fn current_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
 
 fn is_background_completion_transition(prev_state: AgentState, new_state: AgentState) -> bool {
     matches!(new_state, AgentState::Idle)
@@ -532,10 +540,20 @@ impl AppState {
         };
 
         let mut changed = false;
+        let mut newly_seen_terminal_ids = Vec::new();
         for pane in tab.panes.values_mut() {
             if !pane.seen {
                 pane.seen = true;
+                newly_seen_terminal_ids.push(pane.attached_terminal_id.clone());
                 changed = true;
+            }
+        }
+        let status_changed_unix_ms = current_unix_ms();
+        for terminal_id in newly_seen_terminal_ids {
+            if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
+                if terminal.state == AgentState::Idle {
+                    terminal.status_changed_unix_ms = Some(status_changed_unix_ms);
+                }
             }
         }
         changed
@@ -1745,6 +1763,13 @@ impl AppState {
             }
         }
         let seen = self.apply_pane_state_change(ws_idx, pane_id, &change, suppress_completion)?;
+        if pane_agent_status(change.previous_state, previous_seen)
+            != pane_agent_status(change.state, seen)
+        {
+            if let Some(terminal) = self.terminals.get_mut(&terminal_id) {
+                terminal.status_changed_unix_ms = Some(current_unix_ms());
+            }
+        }
         let update = PaneStateUpdate {
             pane_id,
             ws_idx,
@@ -2148,6 +2173,40 @@ mod tests {
             checkout_path: "/repo/herdr".into(),
             is_linked_worktree: false,
         });
+    }
+
+    #[test]
+    fn marking_an_unseen_idle_pane_seen_restarts_its_status_time() {
+        let mut state = app_with_workspaces(&["one"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].terminal_id(pane_id).unwrap().clone();
+        state.workspaces[0].pane_state_mut(pane_id).unwrap().seen = false;
+        state.terminals.get_mut(&terminal_id).unwrap().state = AgentState::Idle;
+
+        assert!(state.mark_active_tab_seen());
+        assert!(state.terminals[&terminal_id]
+            .status_changed_unix_ms
+            .is_some());
+    }
+
+    #[test]
+    fn agent_status_change_records_its_time() {
+        let mut state = app_with_workspaces(&["one"]);
+        let pane_id = state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = state.workspaces[0].terminal_id(pane_id).unwrap().clone();
+
+        state
+            .update_terminal_state(pane_id, |terminal| {
+                Some(
+                    terminal
+                        .set_detected_state_with_mutation(Some(Agent::Claude), AgentState::Working),
+                )
+            })
+            .expect("state change");
+
+        assert!(state.terminals[&terminal_id]
+            .status_changed_unix_ms
+            .is_some());
     }
 
     #[test]

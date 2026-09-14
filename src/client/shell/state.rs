@@ -937,6 +937,7 @@ pub(crate) struct ClientShellState {
     pub(super) last_composed_size: Option<(u16, u16)>,
     pub(super) last_composed_at: Option<std::time::Instant>,
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
+    status_elapsed_refresh_deadline: std::time::Instant,
     pub(super) hits: ShellHitMap,
     pub(super) endpoints: Vec<ClientShellEndpoint>,
     pub(super) active_endpoint_id: ClientEndpointId,
@@ -1097,6 +1098,7 @@ impl ClientShellState {
             last_composed_size: None,
             last_composed_at: None,
             selection_repaint_deadline: None,
+            status_elapsed_refresh_deadline: std::time::Instant::now(),
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
             active_endpoint_id: ClientEndpointId::Local,
@@ -1899,6 +1901,51 @@ impl ClientShellState {
             return true;
         }
         false
+    }
+
+    pub(crate) fn tick_status_elapsed(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if now < self.status_elapsed_refresh_deadline {
+            return false;
+        }
+        self.status_elapsed_refresh_deadline = now + std::time::Duration::from_secs(60);
+
+        if self.sidebar_collapsed || !self.uses_state_elapsed_token() {
+            return false;
+        }
+        if !self.endpoints.iter().any(|endpoint| {
+            endpoint.snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot.agents.iter().any(|agent| {
+                    agent.tokens.iter().any(|(key, _)| {
+                        key == crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN
+                    })
+                })
+            })
+        }) {
+            return false;
+        }
+        true
+    }
+
+    fn uses_state_elapsed_token(&self) -> bool {
+        self.config
+            .agents
+            .rows
+            .iter()
+            .flatten()
+            .chain(
+                self.config
+                    .agents
+                    .rows_by_agent
+                    .values()
+                    .flat_map(|rows| rows.iter().flatten()),
+            )
+            .any(|token| {
+                matches!(
+                    token.parts().0,
+                    crate::config::AgentSidebarToken::StateElapsed
+                )
+            })
     }
 
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {

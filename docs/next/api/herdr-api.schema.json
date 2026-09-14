@@ -6699,6 +6699,14 @@
               },
               "type": "object"
             },
+            "status_changed_unix_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "tab_id": {
               "type": "string"
             },

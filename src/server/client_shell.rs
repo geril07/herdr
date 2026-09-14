@@ -134,6 +134,12 @@ pub(super) fn snapshot(
             let mut state_labels = agent.state_labels.into_iter().collect::<Vec<_>>();
             state_labels.sort_by(|left, right| left.0.cmp(&right.0));
             let mut tokens = agent.tokens.into_iter().collect::<Vec<_>>();
+            if let Some(status_changed_unix_ms) = agent.status_changed_unix_ms {
+                tokens.push((
+                    crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN.to_owned(),
+                    status_changed_unix_ms.to_string(),
+                ));
+            }
             tokens.sort_by(|left, right| left.0.cmp(&right.0));
             protocol::ClientShellAgent {
                 pane_id,
