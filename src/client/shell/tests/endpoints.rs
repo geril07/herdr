@@ -1822,6 +1822,54 @@ fn navigator_ctrl_n_p_moves_selection_without_search_focus() {
 }
 
 #[test]
+fn navigator_space_keeps_selection_and_collapses_to_parent() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let workspace_target = ClientNavigatorTarget::Workspace {
+        endpoint_id: state.active_endpoint_id.clone(),
+        workspace_id: "ws_1".into(),
+    };
+    let selected_target = |state: &ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        let rows =
+            render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+        aggregate_navigation::selected_navigator_target(&rows, navigator)
+    };
+    let row_count = |state: &ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator).len()
+    };
+    let press = |state: &mut ClientShellState, code| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code,
+            KeyModifiers::empty(),
+        ))]);
+    };
+    // Selection starts on the focused pane; Space collapses to the parent workspace.
+    press(&mut state, KeyCode::Char(' '));
+    assert_eq!(selected_target(&state), Some(workspace_target.clone()));
+    assert_eq!(row_count(&state), 1);
+    // Space expands again without moving selection off the workspace row.
+    press(&mut state, KeyCode::Char(' '));
+    assert_eq!(selected_target(&state), Some(workspace_target.clone()));
+    assert_eq!(row_count(&state), 3);
+    // Space on a child row collapses to the parent workspace.
+    press(&mut state, KeyCode::Char('j'));
+    press(&mut state, KeyCode::Char('j'));
+    press(&mut state, KeyCode::Char(' '));
+    assert_eq!(selected_target(&state), Some(workspace_target));
+    assert_eq!(row_count(&state), 1);
+}
+
+#[test]
 fn navigator_keeps_saved_machine_visible_before_metadata_arrives() {
     let (mut state, endpoint_id) = state_with_remote();
     let endpoint = state
