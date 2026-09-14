@@ -300,6 +300,10 @@ impl ClientShellState {
         key: crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) {
+        // Layout-independent shortcuts: normalize `ctrl+ц` to `ctrl+w` before
+        // lease tracking, keybind matching, and pane forwarding so press,
+        // repeat, and release share one identity. Plain typing is untouched.
+        let key = key.normalized_for_shortcut();
         if self.copy_operation_in_flight {
             self.copy_input_queue.push_back(key);
             return;
