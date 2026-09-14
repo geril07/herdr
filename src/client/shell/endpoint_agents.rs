@@ -99,6 +99,7 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
+    let now_unix_ms = super::agent_sidebar::current_unix_ms();
     let mut rendered_rows = endpoints
         .iter()
         .filter_map(|endpoint| {
@@ -112,6 +113,7 @@ fn agent_rows(
                             &agent.pane_id,
                             config,
                             Some(&endpoint.label),
+                            now_unix_ms,
                         )
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))

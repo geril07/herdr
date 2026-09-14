@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::common::{AgentStatus, ReadFormat, ReadSource};
 
+pub const AGENT_STATUS_CHANGED_UNIX_MS_TOKEN: &str = "herdr_status_changed_unix_ms";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentReadParams {
     pub target: String,
@@ -218,6 +220,8 @@ pub struct AgentInfo {
     pub interactive_ready: bool,
     #[serde(default)]
     pub state_change_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_changed_unix_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
