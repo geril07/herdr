@@ -12,6 +12,7 @@ const NESTED_HERDR_MESSAGES: [&str; 6] = [
 ];
 
 mod agent_resume;
+mod agent_view_eval;
 mod api;
 mod app;
 mod build_info;
@@ -559,7 +560,7 @@ fn main() -> io::Result<()> {
 
     // Subcommands and flags (no TUI, no logging needed)
     if args.get(1).map(|s| s.as_str()) == Some("remote-client-bridge") {
-        return remote::run_remote_client_bridge();
+        return remote::run_remote_client_bridge(&args[2..]);
     }
 
     if args.get(1).map(|s| s.as_str()) == Some("server") {
