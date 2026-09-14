@@ -301,88 +301,96 @@ pub(super) fn navigator_rows(
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
             for workspace in &snapshot.workspaces {
                 let workspace_meta = workspace.branch.clone().unwrap_or_default();
+                let key = (endpoint.endpoint_id.clone(), workspace.workspace_id.clone());
+                let expanded = navigator.expanded_workspaces.contains(&key);
+                // The query only matches visible rows: collapsed workspaces
+                // match on their own label, their children are skipped
+                // entirely instead of forcing the tree open.
                 let mut children = Vec::new();
-                for tab in snapshot
-                    .tabs
-                    .iter()
-                    .filter(|tab| tab.workspace_id == workspace.workspace_id)
-                {
-                    let mut panes = Vec::new();
-                    for (index, pane) in snapshot
-                        .panes
+                if !filtering || expanded {
+                    for tab in snapshot
+                        .tabs
                         .iter()
-                        .filter(|pane| pane.tab_id == tab.tab_id)
-                        .enumerate()
+                        .filter(|tab| tab.workspace_id == workspace.workspace_id)
                     {
-                        let agent = snapshot
-                            .agents
+                        let mut panes = Vec::new();
+                        for (index, pane) in snapshot
+                            .panes
                             .iter()
-                            .find(|agent| agent.pane_id == pane.pane_id);
-                        let status = agent
-                            .map_or(crate::api::schema::AgentStatus::Unknown, |agent| {
-                                agent.agent_status
-                            });
-                        let label = pane
-                            .label
-                            .clone()
-                            .or_else(|| agent.and_then(|agent| agent.name.clone()))
-                            .or_else(|| agent.and_then(|agent| agent.display_agent.clone()))
-                            .or_else(|| agent.and_then(|agent| agent.title.clone()))
-                            .unwrap_or_else(|| format!("pane {}", index + 1));
-                        let meta = pane
-                            .foreground_cwd
-                            .clone()
-                            .or_else(|| pane.cwd.clone())
-                            .unwrap_or_default();
-                        if !filtering
-                            || filter(status)
-                                && (endpoint_query_matches || text(&label) || text(&meta))
+                            .filter(|pane| pane.tab_id == tab.tab_id)
+                            .enumerate()
                         {
-                            panes.push(ClientNavigatorRow {
-                                depth: 2 + depth_offset,
-                                label,
-                                meta,
-                                status: Some(status),
+                            let agent = snapshot
+                                .agents
+                                .iter()
+                                .find(|agent| agent.pane_id == pane.pane_id);
+                            let status = agent
+                                .map_or(crate::api::schema::AgentStatus::Unknown, |agent| {
+                                    agent.agent_status
+                                });
+                            let label = pane
+                                .label
+                                .clone()
+                                .or_else(|| agent.and_then(|agent| agent.name.clone()))
+                                .or_else(|| agent.and_then(|agent| agent.display_agent.clone()))
+                                .or_else(|| agent.and_then(|agent| agent.title.clone()))
+                                .unwrap_or_else(|| format!("pane {}", index + 1));
+                            let meta = pane
+                                .foreground_cwd
+                                .clone()
+                                .or_else(|| pane.cwd.clone())
+                                .unwrap_or_default();
+                            if !filtering
+                                || filter(status)
+                                    && (endpoint_query_matches || text(&label) || text(&meta))
+                            {
+                                panes.push(ClientNavigatorRow {
+                                    depth: 2 + depth_offset,
+                                    label,
+                                    meta,
+                                    status: Some(status),
+                                    stale,
+                                    current: endpoint.endpoint_id == *active_endpoint_id
+                                        && snapshot.focused_pane_id.as_deref()
+                                            == Some(&pane.pane_id),
+                                    target: ClientNavigatorTarget::Pane {
+                                        endpoint_id: endpoint.endpoint_id.clone(),
+                                        pane_id: pane.pane_id.clone(),
+                                    },
+                                });
+                            }
+                        }
+                        if !filtering
+                            || filter(tab.agent_status)
+                                && (endpoint_query_matches || text(&tab.label))
+                            || !panes.is_empty()
+                        {
+                            children.push(ClientNavigatorRow {
+                                depth: 1 + depth_offset,
+                                label: tab.label.clone(),
+                                meta: format!(
+                                    "{} panes",
+                                    snapshot
+                                        .panes
+                                        .iter()
+                                        .filter(|pane| pane.tab_id == tab.tab_id)
+                                        .count()
+                                ),
+                                status: None,
                                 stale,
-                                current: endpoint.endpoint_id == *active_endpoint_id
-                                    && snapshot.focused_pane_id.as_deref() == Some(&pane.pane_id),
-                                target: ClientNavigatorTarget::Pane {
+                                current: false,
+                                target: ClientNavigatorTarget::Tab {
                                     endpoint_id: endpoint.endpoint_id.clone(),
-                                    pane_id: pane.pane_id.clone(),
+                                    tab_id: tab.tab_id.clone(),
                                 },
                             });
+                            children.extend(panes);
                         }
-                    }
-                    if !filtering
-                        || filter(tab.agent_status) && (endpoint_query_matches || text(&tab.label))
-                        || !panes.is_empty()
-                    {
-                        children.push(ClientNavigatorRow {
-                            depth: 1 + depth_offset,
-                            label: tab.label.clone(),
-                            meta: format!(
-                                "{} panes",
-                                snapshot
-                                    .panes
-                                    .iter()
-                                    .filter(|pane| pane.tab_id == tab.tab_id)
-                                    .count()
-                            ),
-                            status: None,
-                            stale,
-                            current: false,
-                            target: ClientNavigatorTarget::Tab {
-                                endpoint_id: endpoint.endpoint_id.clone(),
-                                tab_id: tab.tab_id.clone(),
-                            },
-                        });
-                        children.extend(panes);
                     }
                 }
                 let workspace_matches = filter(workspace.agent_status)
                     && (endpoint_query_matches || text(&workspace.label) || text(&workspace_meta));
                 if !filtering || workspace_matches || !children.is_empty() {
-                    let key = (endpoint.endpoint_id.clone(), workspace.workspace_id.clone());
                     endpoint_rows.push(ClientNavigatorRow {
                         depth: depth_offset,
                         label: workspace.label.clone(),
@@ -395,7 +403,7 @@ pub(super) fn navigator_rows(
                             workspace_id: workspace.workspace_id.clone(),
                         },
                     });
-                    if navigator.expanded_workspaces.contains(&key) || filtering {
+                    if expanded {
                         endpoint_rows.extend(children);
                     }
                 }
