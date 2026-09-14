@@ -353,6 +353,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
+# Agent status indicators on tabs.
+# tab_status = true
+# tab_status_idle = true
+# tab_status_max = 3
+# tab_status_spacing = true
+# tab_status_order = "physical"
+
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"

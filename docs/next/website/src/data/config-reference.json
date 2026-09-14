@@ -1069,6 +1069,40 @@
           "description": "Text inserted between visible right-aligned tab bar entries."
         },
         {
+          "key": "ui.tab_status",
+          "type": "boolean",
+          "default": "true",
+          "description": "Enable agent status indicators on tabs."
+        },
+        {
+          "key": "ui.tab_status_idle",
+          "type": "boolean",
+          "default": "true",
+          "description": "Show indicators for Idle agents."
+        },
+        {
+          "key": "ui.tab_status_max",
+          "type": "integer",
+          "default": "3",
+          "description": "Maximum number of status indicators per tab."
+        },
+        {
+          "key": "ui.tab_status_spacing",
+          "type": "boolean",
+          "default": "true",
+          "description": "Add space between multiple status indicators on a tab."
+        },
+        {
+          "key": "ui.tab_status_order",
+          "type": "enum",
+          "default": "\"physical\"",
+          "description": "Tab status indicator order: \"physical\" or \"priority\".",
+          "values": [
+            "physical",
+            "priority"
+          ]
+        },
+        {
           "key": "ui.window_title",
           "type": "string",
           "default": "\"{hostname}: {workspace}\"",
