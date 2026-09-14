@@ -239,9 +239,10 @@ pub(super) fn agent_rows(
     config: &ClientShellConfig,
     machine: Option<&str>,
 ) -> Vec<AgentRow> {
+    let now_unix_ms = current_unix_ms();
     ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
         .into_iter()
-        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
+        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine, now_unix_ms))
         .collect()
 }
 
@@ -250,6 +251,7 @@ pub(super) fn agent_row(
     pane_id: &str,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    now_unix_ms: u64,
 ) -> Option<AgentRow> {
     let agent = snapshot
         .agents
@@ -283,7 +285,13 @@ pub(super) fn agent_row(
         .iter()
         .cloned()
         .collect::<HashMap<_, _>>();
-    let tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
+    let mut tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
+    let status_elapsed = tokens
+        .remove(crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN)
+        .and_then(|value| value.parse().ok())
+        .and_then(|status_changed_unix_ms| {
+            format_status_elapsed(now_unix_ms, status_changed_unix_ms)
+        });
     let state_text = labels
         .get(status_text(agent.agent_status))
         .map(String::as_str)
@@ -306,6 +314,7 @@ pub(super) fn agent_row(
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             canonical_agent,
+            status_elapsed: status_elapsed.as_deref(),
             tokens: &tokens,
         },
         state_text,
@@ -392,5 +401,49 @@ fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str 
         AgentStatus::Done => "done",
         AgentStatus::Working => "working",
         AgentStatus::Idle | AgentStatus::Unknown => "idle",
+    }
+}
+
+pub(super) fn current_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn format_status_elapsed(now_unix_ms: u64, status_changed_unix_ms: u64) -> Option<String> {
+    let elapsed_minutes = now_unix_ms.checked_sub(status_changed_unix_ms)? / 60_000;
+    if elapsed_minutes == 0 {
+        return Some("<1m".into());
+    }
+    if elapsed_minutes < 60 {
+        return Some(format!("{elapsed_minutes}m"));
+    }
+    Some(format!(
+        "{}h{:02}m",
+        elapsed_minutes / 60,
+        elapsed_minutes % 60
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_status_elapsed;
+
+    #[test]
+    fn status_elapsed_uses_minute_precision() {
+        let minute = 60_000;
+        assert_eq!(format_status_elapsed(59_999, 0).as_deref(), Some("<1m"));
+        assert_eq!(format_status_elapsed(minute, 0).as_deref(), Some("1m"));
+        assert_eq!(
+            format_status_elapsed(59 * minute, 0).as_deref(),
+            Some("59m")
+        );
+        assert_eq!(
+            format_status_elapsed(61 * minute, 0).as_deref(),
+            Some("1h01m")
+        );
+        assert_eq!(format_status_elapsed(0, 1), None);
     }
 }
