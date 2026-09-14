@@ -191,17 +191,20 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
-        let expanded_workspaces =
+        let expanded_workspaces = if self.config.navigator_start_expanded {
             super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
                 .flat_map(|endpoint| {
                     endpoint.snapshot.workspaces.iter().map(move |workspace| {
                         (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
                     })
                 })
-                .collect();
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let mut navigator = ClientNavigatorOverlay {
             query: String::new(),
-            search_focused: false,
+            search_focused: self.config.navigator_start_search_focused,
             selected: None,
             scroll: 0,
             filter: None,
@@ -741,6 +744,16 @@ impl ClientShellState {
                 return;
             }
             if matches!(code, KeyCode::Up | KeyCode::Char('k')) && modifiers.is_empty() {
+                self.move_navigator_selection(-1);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_navigator_selection(1);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
                 self.move_navigator_selection(-1);
                 outcome.repaint = true;
                 return;

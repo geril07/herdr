@@ -147,6 +147,8 @@ impl ClientShellConfig {
             keybinding_source: ClientShellKeybindingSource::Local,
             prompt_new_tab_name: config.ui.prompt_new_tab_name,
             prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
+            navigator_start_expanded: config.ui.navigator_start_expanded,
+            navigator_start_search_focused: config.ui.navigator_start_search_focused,
             confirm_close: config.ui.confirm_close,
             confirm_pane_close: config.ui.confirm_pane_close,
             confirm_tab_close: config.ui.confirm_tab_close,
@@ -340,6 +342,8 @@ impl ClientShellConfig {
                 self.clipboard_toast_position = ui.toast.clipboard.position;
                 self.prompt_new_tab_name = ui.prompt_new_tab_name;
                 self.prompt_new_workspace_name = ui.prompt_new_workspace_name;
+                self.navigator_start_expanded = ui.navigator_start_expanded;
+                self.navigator_start_search_focused = ui.navigator_start_search_focused;
                 self.confirm_close = ui.confirm_close;
                 self.confirm_pane_close = ui.confirm_pane_close;
                 self.confirm_tab_close = ui.confirm_tab_close;
