@@ -481,6 +481,10 @@ impl ClientShellState {
                     search_focused: true,
                     ..
                 }))
+                | Some(ClientShellOverlay::AgentPicker(ClientAgentPickerOverlay {
+                    search_focused: true,
+                    ..
+                }))
                 | Some(ClientShellOverlay::Help(ClientHelpOverlay {
                     search_focused: true,
                     ..
