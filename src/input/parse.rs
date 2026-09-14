@@ -29,10 +29,20 @@ fn parse_kitty_key_sequence(data: &str) -> Option<TerminalKey> {
 
     let mut key_fields = key_part.split(':');
     let codepoint = key_fields.next()?.parse::<u32>().ok()?;
+    // Kitty alternate subfields are `[shifted][:base-layout]`. A terminal that
+    // reports only the base key (e.g. Cyrillic `ц` on physical `w` without
+    // Shift) uses an empty middle field: `codepoint::base`.
     let shifted_codepoint = key_fields
         .next()
         .filter(|field| !field.is_empty())
         .and_then(|field| field.parse::<u32>().ok());
+    let base_layout_codepoint = key_fields
+        .next()
+        .filter(|field| !field.is_empty())
+        .and_then(|field| field.parse::<u32>().ok());
+    if key_fields.next().is_some() {
+        return None;
+    }
 
     let code = kitty_codepoint_to_keycode(codepoint)?;
     let associated_text = match associated_text {
@@ -57,6 +67,9 @@ fn parse_kitty_key_sequence(data: &str) -> Option<TerminalKey> {
     let mut key = TerminalKey::new(code, modifiers).with_kind(kind);
     if let Some(shifted_codepoint) = shifted_codepoint {
         key = key.with_shifted_codepoint(shifted_codepoint);
+    }
+    if let Some(base_layout_codepoint) = base_layout_codepoint {
+        key = key.with_base_layout_codepoint(base_layout_codepoint);
     }
     Some(key.with_generated_text(associated_text))
 }
@@ -702,6 +715,24 @@ mod tests {
             assert_eq!(key.kind, crossterm::event::KeyEventKind::Press);
             assert_eq!(key.shifted_codepoint, Some(shifted as u32));
         }
+    }
+
+    #[test]
+    fn parse_kitty_sequence_captures_base_layout_key() {
+        let key = parse_terminal_key_sequence("\x1b[1094::119;5u").unwrap();
+        assert_eq!(key.code, KeyCode::Char('ц'));
+        assert_eq!(key.modifiers, KeyModifiers::CONTROL);
+        assert_eq!(key.shifted_codepoint, None);
+        assert_eq!(key.base_layout_codepoint, Some('w' as u32));
+    }
+
+    #[test]
+    fn parse_kitty_sequence_captures_shifted_and_base_layout_keys() {
+        let key = parse_terminal_key_sequence("\x1b[1094:1062:119;6u").unwrap();
+        assert_eq!(key.code, KeyCode::Char('ц'));
+        assert_eq!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+        assert_eq!(key.shifted_codepoint, Some(1062));
+        assert_eq!(key.base_layout_codepoint, Some('w' as u32));
     }
 
     #[test]

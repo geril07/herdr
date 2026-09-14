@@ -23,6 +23,11 @@ pub fn encode_terminal_key(key: TerminalKey, protocol: KeyboardProtocol) -> Vec<
         return Vec::new();
     }
 
+    // Layout-independent `Ctrl`/`Super` shortcuts: `ctrl+ц` must reach the pane
+    // as `ctrl+w` (and `ctrl+о` as `ctrl+j`/LF), using the Kitty base-layout key
+    // when reported, else the Russian fallback table. Plain typing is untouched.
+    let key = key.normalized_for_shortcut();
+
     // REPORT_ALL_KEYS must retain physical press/repeat/release semantics instead of
     // reducing a native key to its layout-generated text.
     let preserve_physical_key = key.has_physical_identity() && protocol.reports_all_keys();
@@ -623,6 +628,43 @@ mod tests {
     fn legacy_ctrl_non_ascii_char_uses_utf8() {
         let key = KeyEvent::new(KeyCode::Char('ß'), KeyModifiers::CONTROL);
         assert_eq!(encode_key(key, KeyboardProtocol::Legacy), "ß".as_bytes());
+    }
+
+    #[test]
+    fn legacy_ctrl_russian_word_erase_key() {
+        let key = KeyEvent::new(KeyCode::Char('ц'), KeyModifiers::CONTROL);
+        assert_eq!(encode_key(key, KeyboardProtocol::Legacy), vec![23]);
+    }
+
+    #[test]
+    fn legacy_ctrl_russian_newline_key_is_lf() {
+        let key = KeyEvent::new(KeyCode::Char('о'), KeyModifiers::CONTROL);
+        assert_eq!(encode_key(key, KeyboardProtocol::Legacy), b"\n");
+    }
+
+    #[test]
+    fn legacy_ctrl_russian_uses_reported_base_key() {
+        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::CONTROL)
+            .with_base_layout_codepoint('w' as u32);
+        assert_eq!(encode_terminal_key(key, KeyboardProtocol::Legacy), vec![23]);
+    }
+
+    #[test]
+    fn kitty_ctrl_russian_reports_latin_primary() {
+        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::CONTROL);
+        assert_eq!(
+            encode_terminal_key(key, KeyboardProtocol::Kitty { flags: 1 }),
+            b"\x1b[119;5u"
+        );
+    }
+
+    #[test]
+    fn plain_russian_typing_is_untouched() {
+        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::empty());
+        assert_eq!(
+            encode_terminal_key(key, KeyboardProtocol::Legacy),
+            "ц".as_bytes()
+        );
     }
 
     #[test]
