@@ -30,6 +30,8 @@ pub(crate) enum KeybindAction {
     WorkspacePicker,
     /// Enter navigate mode on the sidebar Agents section.
     AgentNavigation,
+    /// Open the agent picker popup.
+    AgentPicker,
     PreviousWorkspace,
     NextWorkspace,
     PreviousAgent,
@@ -102,6 +104,7 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.settings, KeybindAction::Settings),
         (&keybinds.workspace_picker, KeybindAction::WorkspacePicker),
         (&keybinds.agent_navigation, KeybindAction::AgentNavigation),
+        (&keybinds.agent_picker, KeybindAction::AgentPicker),
         (&keybinds.new_workspace, KeybindAction::NewWorkspace),
         (&keybinds.new_worktree, KeybindAction::NewWorktree),
         (&keybinds.open_worktree, KeybindAction::OpenWorktree),

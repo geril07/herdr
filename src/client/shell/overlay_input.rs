@@ -219,6 +219,97 @@ impl ClientShellState {
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
     }
 
+    pub(super) fn open_agent_picker_overlay(&mut self) {
+        let mut picker = ClientAgentPickerOverlay {
+            query: TextEditor::default(),
+            search_focused: false,
+            selected: None,
+            scroll: 0,
+            filter: None,
+        };
+        let rows = render::client_agent_picker_rows(
+            &self.endpoints,
+            &self.active_endpoint_id,
+            self.config.agent_panel_sort,
+            &picker,
+        );
+        picker.selected = rows
+            .iter()
+            .find(|row| row.current)
+            .or_else(|| rows.first())
+            .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()));
+        self.overlay = Some(ClientShellOverlay::AgentPicker(picker));
+    }
+
+    /// Put the picker selection back on the current row, or the first row.
+    fn reset_agent_picker_selection_to_current(&mut self) {
+        let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_ref() else {
+            return;
+        };
+        let rows = render::client_agent_picker_rows(
+            &self.endpoints,
+            &self.active_endpoint_id,
+            self.config.agent_panel_sort,
+            picker,
+        );
+        let next = rows
+            .iter()
+            .find(|row| row.current)
+            .or_else(|| rows.first())
+            .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()));
+        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+            picker.selected = next;
+        }
+    }
+
+    pub(super) fn move_agent_picker_selection(&mut self, delta: isize) {
+        let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() else {
+            return;
+        };
+        let rows = render::client_agent_picker_rows(
+            &self.endpoints,
+            &self.active_endpoint_id,
+            self.config.agent_panel_sort,
+            picker,
+        );
+        if rows.is_empty() {
+            picker.selected = None;
+            return;
+        }
+        let selected =
+            super::aggregate_navigation::agent_picker_selected_index(&rows, picker).unwrap_or(0);
+        let next =
+            (selected as isize + delta).clamp(0, rows.len().saturating_sub(1) as isize) as usize;
+        picker.selected = Some((rows[next].endpoint_id.clone(), rows[next].pane_id.clone()));
+    }
+
+    pub(super) fn accept_agent_picker_selection(&mut self, outcome: &mut ClientShellInput) {
+        let target = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::AgentPicker(picker) => {
+                let rows = render::client_agent_picker_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    self.config.agent_panel_sort,
+                    picker,
+                );
+                super::aggregate_navigation::selected_agent_picker_target(&rows, picker)
+            }
+            _ => None,
+        });
+        let Some((endpoint_id, pane_id)) = target else {
+            return;
+        };
+        let activated = self.focus_or_activate(
+            endpoint_id,
+            ClientEndpointFocusTarget::Pane(pane_id),
+            outcome,
+        );
+        if activated {
+            self.overlay = None;
+        }
+        outcome.repaint = true;
+    }
+
     pub(super) fn move_navigator_selection(&mut self, delta: isize) {
         let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() else {
             return;
@@ -614,6 +705,13 @@ impl ClientShellState {
                 }
                 true
             }
+            Some(ClientShellOverlay::AgentPicker(picker)) if picker.search_focused => {
+                if picker.query.insert(text) {
+                    picker.filter = None;
+                    picker.selected = None;
+                }
+                true
+            }
             _ => false,
         }
     }
@@ -958,6 +1056,163 @@ impl ClientShellState {
             }
             if code == KeyCode::Char(' ') && modifiers.is_empty() {
                 self.toggle_selected_navigator_workspace();
+                outcome.repaint = true;
+                return;
+            }
+            return;
+        }
+
+        if matches!(self.overlay, Some(ClientShellOverlay::AgentPicker(_))) {
+            let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
+            let search_focused = matches!(
+                self.overlay,
+                Some(ClientShellOverlay::AgentPicker(ClientAgentPickerOverlay {
+                    search_focused: true,
+                    ..
+                }))
+            );
+            if code == KeyCode::Esc {
+                if search_focused {
+                    if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                        picker.search_focused = false;
+                    }
+                } else {
+                    self.overlay = None;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Enter {
+                self.accept_agent_picker_selection(outcome);
+                return;
+            }
+            if search_focused {
+                if code == KeyCode::Up
+                    || code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    self.move_agent_picker_selection(-1);
+                    outcome.repaint = true;
+                    return;
+                }
+                if code == KeyCode::Down
+                    || code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    self.move_agent_picker_selection(1);
+                    outcome.repaint = true;
+                    return;
+                }
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    // TextEditor owns the editing keys, including ctrl+w, ctrl+u
+                    // and backspace, so they behave like every other field.
+                    if let Some(content_changed) = picker.query.handle_key(key) {
+                        if content_changed {
+                            picker.filter = None;
+                            picker.selected = None;
+                        }
+                    }
+                }
+                return;
+            }
+            if code == KeyCode::Backspace && modifiers.is_empty() {
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    if picker.filter.take().is_some() {
+                        picker.query.clear();
+                    }
+                }
+                self.reset_agent_picker_selection_to_current();
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Home && modifiers.is_empty() {
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    picker.selected = None;
+                    picker.scroll = 0;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            if matches!(code, KeyCode::End | KeyCode::Char('G')) && modifiers.is_empty() {
+                let last = self.overlay.as_ref().and_then(|overlay| match overlay {
+                    ClientShellOverlay::AgentPicker(picker) => {
+                        let rows = render::client_agent_picker_rows(
+                            &self.endpoints,
+                            &self.active_endpoint_id,
+                            self.config.agent_panel_sort,
+                            picker,
+                        );
+                        rows.last()
+                            .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()))
+                    }
+                    _ => None,
+                });
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    picker.selected = last;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('/') && modifiers.is_empty() {
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    picker.search_focused = true;
+                    picker.filter = None;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            if matches!(code, KeyCode::Down | KeyCode::Char('j')) && modifiers.is_empty() {
+                self.move_agent_picker_selection(1);
+                outcome.repaint = true;
+                return;
+            }
+            if matches!(code, KeyCode::Up | KeyCode::Char('k')) && modifiers.is_empty() {
+                self.move_agent_picker_selection(-1);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_agent_picker_selection(1);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_agent_picker_selection(-1);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_agent_picker_selection(8);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_agent_picker_selection(-8);
+                outcome.repaint = true;
+                return;
+            }
+            if let Some(filter) = match code {
+                KeyCode::Char('b') if modifiers.is_empty() => Some(ClientNavigatorFilter::Blocked),
+                KeyCode::Char('w') if modifiers.is_empty() => Some(ClientNavigatorFilter::Working),
+                KeyCode::Char('i') if modifiers.is_empty() => Some(ClientNavigatorFilter::Idle),
+                KeyCode::Char('d') if modifiers.is_empty() => Some(ClientNavigatorFilter::Done),
+                _ => None,
+            } {
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    picker.query.clear();
+                    picker.filter = Some(filter);
+                    picker.selected = None;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            let is_f_filter_clear = (matches!(code, KeyCode::Char('F'))
+                || (matches!(code, KeyCode::Char('f')) && modifiers.contains(KeyModifiers::SHIFT)))
+                && modifiers.difference(KeyModifiers::SHIFT).is_empty();
+            if is_f_filter_clear {
+                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
+                    picker.query.clear();
+                    picker.filter = None;
+                }
+                self.reset_agent_picker_selection_to_current();
                 outcome.repaint = true;
                 return;
             }

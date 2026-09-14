@@ -132,6 +132,9 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_popup: Rect,
     pub(super) navigator_search: Rect,
     pub(super) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
+    pub(super) agent_picker_popup: Rect,
+    pub(super) agent_picker_search: Rect,
+    pub(super) agent_picker_rows: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) navigator_scrollbar: Rect,
     pub(super) navigator_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) worktree_search: Rect,
@@ -296,6 +299,7 @@ pub(super) enum ClientShellOverlayKind {
     ConfirmClose,
     Help,
     Navigator,
+    AgentPicker,
     WorktreeCreate,
     WorktreeOpen,
     WorktreeRemove,
@@ -381,6 +385,15 @@ pub(super) struct ClientNavigatorOverlay {
     /// Workspaces whose panes are hidden. A workspace is collapsed when its key
     /// is present, so a new or renamed workspace is expanded until collapsed.
     pub(super) collapsed_workspaces: std::collections::HashSet<(ClientEndpointId, String)>,
+}
+
+#[derive(Debug)]
+pub(super) struct ClientAgentPickerOverlay {
+    pub(super) query: TextEditor,
+    pub(super) search_focused: bool,
+    pub(super) selected: Option<(ClientEndpointId, String)>,
+    pub(super) scroll: usize,
+    pub(super) filter: Option<ClientNavigatorFilter>,
 }
 
 #[derive(Debug)]
@@ -614,6 +627,7 @@ pub(super) enum ClientShellOverlay {
     ConfirmClose(ClientConfirmCloseOverlay),
     Help(ClientHelpOverlay),
     Navigator(ClientNavigatorOverlay),
+    AgentPicker(ClientAgentPickerOverlay),
     WorktreeCreate(ClientWorktreeCreateOverlay),
     WorktreeOpen(ClientWorktreeOpenOverlay),
     WorktreeRemove(ClientWorktreeRemoveOverlay),
@@ -632,6 +646,7 @@ impl ClientShellOverlay {
             Self::ConfirmClose(_) => ClientShellOverlayKind::ConfirmClose,
             Self::Help(_) => ClientShellOverlayKind::Help,
             Self::Navigator(_) => ClientShellOverlayKind::Navigator,
+            Self::AgentPicker(_) => ClientShellOverlayKind::AgentPicker,
             Self::WorktreeCreate(_) => ClientShellOverlayKind::WorktreeCreate,
             Self::WorktreeOpen(_) => ClientShellOverlayKind::WorktreeOpen,
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,

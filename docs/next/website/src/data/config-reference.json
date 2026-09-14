@@ -536,6 +536,12 @@
           "description": "Enter navigate mode on the sidebar Agents section. Default: \"prefix+a\"."
         },
         {
+          "key": "keys.agent_picker",
+          "type": "keybinding",
+          "default": "\"prefix+shift+a\"",
+          "description": "Open the agent picker popup. Default: \"prefix+shift+a\"."
+        },
+        {
           "key": "keys.workspace_picker",
           "type": "keybinding",
           "default": "\"prefix+w\"",

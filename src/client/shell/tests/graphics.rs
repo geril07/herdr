@@ -278,6 +278,13 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             filter: None,
             collapsed_workspaces: Default::default(),
         }),
+        ClientShellOverlay::AgentPicker(ClientAgentPickerOverlay {
+            query: TextEditor::default(),
+            search_focused: false,
+            selected: None,
+            scroll: 0,
+            filter: None,
+        }),
         ClientShellOverlay::WorktreeCreate(ClientWorktreeCreateOverlay {
             source_workspace_id: "ws_1".into(),
             repo_name: "repo".into(),
@@ -348,6 +355,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
                 snapshot,
                 &state.endpoints,
                 &state.active_endpoint_id,
+                &state.config,
                 &state.config.keybinds,
                 state.config.status_indicators,
                 &state.config.palette,
