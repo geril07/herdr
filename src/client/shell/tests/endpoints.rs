@@ -1750,6 +1750,78 @@ fn navigator_uses_machine_parents_only_for_federated_clients() {
 }
 
 #[test]
+fn navigator_start_presets_control_expansion_and_search_focus() {
+    let mut config = Config::default();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    assert!(!navigator.search_focused);
+    assert!(!navigator.expanded_workspaces.is_empty());
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(rows
+        .iter()
+        .any(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. })));
+
+    config.ui.navigator_start_expanded = false;
+    config.ui.navigator_start_search_focused = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    assert!(navigator.search_focused);
+    assert!(navigator.expanded_workspaces.is_empty());
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert!(!rows.is_empty());
+    assert!(rows
+        .iter()
+        .all(|row| matches!(row.target, ClientNavigatorTarget::Workspace { .. })));
+}
+
+#[test]
+fn navigator_ctrl_n_p_moves_selection_without_search_focus() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    // snapshot() focuses pane_1, so selection starts on the pane row (index 2).
+    let selected = |state: &ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        let rows =
+            render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+        aggregate_navigation::navigator_selected_index(&rows, navigator)
+    };
+    assert_eq!(selected(&state), Some(2));
+    let key = |state: &mut ClientShellState, code| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code,
+            KeyModifiers::CONTROL,
+        ))]);
+    };
+    key(&mut state, KeyCode::Char('p'));
+    assert_eq!(selected(&state), Some(1));
+    key(&mut state, KeyCode::Char('p'));
+    assert_eq!(selected(&state), Some(0));
+    key(&mut state, KeyCode::Char('n'));
+    assert_eq!(selected(&state), Some(1));
+    key(&mut state, KeyCode::Char('n'));
+    assert_eq!(selected(&state), Some(2));
+}
+
+#[test]
 fn navigator_keeps_saved_machine_visible_before_metadata_arrives() {
     let (mut state, endpoint_id) = state_with_remote();
     let endpoint = state

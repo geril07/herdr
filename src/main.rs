@@ -295,6 +295,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Ask for a workspace name before interactive creation.
 # prompt_new_workspace_name = false
 
+# Start the session navigator with all workspaces expanded.
+# Set false for a tmux-style sessions-only list; Space still expands one workspace.
+# navigator_start_expanded = true
+
+# Focus the session navigator search field on open.
+# Set true for fzf-style type-to-filter with Ctrl+n/Ctrl+p navigation.
+# navigator_start_search_focused = false
+
 # Draw borders around split panes.
 # "auto" draws them only for split panes, "always" also frames a lone pane
 # (only while pane_outer_borders is enabled), "off" disables them.
