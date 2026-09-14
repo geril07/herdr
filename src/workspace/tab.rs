@@ -202,7 +202,8 @@ impl Tab {
     }
 
     pub fn set_custom_name(&mut self, name: String) {
-        self.custom_name = Some(name);
+        let trimmed = name.trim().to_owned();
+        self.custom_name = (!trimmed.is_empty()).then_some(trimmed);
     }
 
     pub fn split_focused_command(
