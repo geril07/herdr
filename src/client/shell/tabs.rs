@@ -1,8 +1,86 @@
 use super::*;
+use crate::api::schema::AgentStatus;
+use crate::config::TabStatusOrderConfig;
 
 const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
 const MIN_TAB_STRIP_WIDTH: u16 =
     MIN_TAB_WIDTH + NEW_TAB_WIDTH + TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2);
+fn tab_status_priority(status: AgentStatus) -> u8 {
+    match status {
+        AgentStatus::Blocked => 4,
+        AgentStatus::Working => 3,
+        AgentStatus::Done => 2,
+        AgentStatus::Idle => 1,
+        AgentStatus::Unknown => 0,
+    }
+}
+
+pub(crate) fn tab_agent_statuses(
+    tab_id: &str,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+) -> Vec<AgentStatus> {
+    if !config.tab_status || config.tab_status_max == 0 {
+        return Vec::new();
+    }
+
+    let pane_pos = |pane_id: &str| -> usize {
+        snapshot
+            .panes
+            .iter()
+            .position(|p| p.pane_id == pane_id)
+            .unwrap_or(usize::MAX)
+    };
+
+    let mut agents = snapshot
+        .agents
+        .iter()
+        .filter(|agent| agent.tab_id == tab_id)
+        .filter(|agent| {
+            if config.tab_status_idle {
+                true
+            } else {
+                matches!(
+                    agent.agent_status,
+                    AgentStatus::Working | AgentStatus::Blocked | AgentStatus::Done
+                )
+            }
+        })
+        .collect::<Vec<_>>();
+
+    match config.tab_status_order {
+        TabStatusOrderConfig::Physical => {
+            agents.sort_by_key(|agent| pane_pos(&agent.pane_id));
+        }
+        TabStatusOrderConfig::Priority => {
+            agents.sort_by_key(|agent| {
+                (
+                    std::cmp::Reverse(tab_status_priority(agent.agent_status)),
+                    pane_pos(&agent.pane_id),
+                )
+            });
+        }
+    }
+
+    agents
+        .into_iter()
+        .take(config.tab_status_max)
+        .map(|agent| agent.agent_status)
+        .collect()
+}
+
+pub(crate) fn tab_indicator_prefix_width(count: usize, spacing: bool) -> u16 {
+    if count == 0 {
+        0
+    } else {
+        let inner_width = if spacing {
+            count.saturating_mul(2).saturating_sub(1)
+        } else {
+            count
+        };
+        inner_width.saturating_add(1).min(u16::MAX as usize) as u16
+    }
+}
 
 pub(crate) fn render_tab_bar(
     buffer: &mut Buffer,
@@ -21,11 +99,21 @@ pub(crate) fn render_tab_bar(
         .iter()
         .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
         .collect::<Vec<_>>();
+    let tab_statuses = tabs
+        .iter()
+        .map(|tab| tab_agent_statuses(&tab.tab_id, snapshot, config))
+        .collect::<Vec<_>>();
     let desired_widths = tabs
         .iter()
-        .map(|tab| {
+        .zip(&tab_statuses)
+        .map(|(tab, statuses)| {
             let label = tab_label(tab);
-            display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
+            let indicator_width =
+                tab_indicator_prefix_width(statuses.len(), config.tab_status_spacing);
+            display_width(&label)
+                .saturating_add(indicator_width)
+                .saturating_add(4)
+                .max(MIN_TAB_WIDTH)
         })
         .collect::<Vec<_>>();
     let content = tab_bar_content_area(snapshot, area);
@@ -93,6 +181,7 @@ pub(crate) fn render_tab_bar(
     let mut last_visible = None;
     for (index, tab) in tabs.iter().enumerate().skip(*tab_scroll) {
         let name = tab_label(tab);
+        let statuses = &tab_statuses[index];
         let desired = desired_widths[index];
         let remaining = tab_right.saturating_sub(x);
         let width = desired.min(remaining);
@@ -114,15 +203,43 @@ pub(crate) fn render_tab_bar(
         } else {
             Style::default().fg(palette.overlay0).bg(palette.surface0)
         };
-        let padding = width.saturating_sub(display_width(&name));
+        let tab_bg = if tab.focused {
+            palette.accent
+        } else {
+            palette.surface0
+        };
+
+        buffer.set_style(rect, style);
+
+        let indicator_prefix_width =
+            tab_indicator_prefix_width(statuses.len(), config.tab_status_spacing);
+        let total_content_width = display_width(&name).saturating_add(indicator_prefix_width);
+        let padding = width.saturating_sub(total_content_width);
         let left = padding / 2;
-        let text = format!(
-            "{empty:left$}{name}{empty:right_padding$}",
-            empty = "",
-            left = left as usize,
-            right_padding = padding.saturating_sub(left) as usize,
-        );
-        put_text(buffer, rect.x, rect.y, rect.width, &text, style);
+        let mut cur_x = rect.x.saturating_add(left);
+
+        if !statuses.is_empty() {
+            for (i, status) in statuses.iter().enumerate() {
+                if i > 0 && config.tab_status_spacing {
+                    cur_x = cur_x.saturating_add(1);
+                }
+                if cur_x < rect.right() {
+                    let icon = status_icon(*status, config.status_indicators);
+                    let icon_style = Style::default()
+                        .fg(status_color(*status, palette))
+                        .bg(tab_bg);
+                    put_text(buffer, cur_x, rect.y, 1, icon, icon_style);
+                }
+                cur_x = cur_x.saturating_add(1);
+            }
+            cur_x = cur_x.saturating_add(1);
+        }
+
+        if cur_x < rect.right() {
+            let avail = rect.right().saturating_sub(cur_x);
+            put_text(buffer, cur_x, rect.y, avail, &name, style);
+        }
+
         hits.tabs.push((rect, tab.tab_id.clone()));
         first_visible.get_or_insert(index);
         last_visible = Some(index);
@@ -379,5 +496,371 @@ fn tab_label(tab: &ClientShellTab) -> String {
         format!("{} Z", tab.label)
     } else {
         tab.label.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::protocol::{
+        ClientShellAgent, ClientShellPane, ClientShellTab, ClientShellWorkspace,
+    };
+
+    fn make_agent(
+        pane_id: &str,
+        workspace_id: &str,
+        tab_id: &str,
+        status: AgentStatus,
+    ) -> ClientShellAgent {
+        ClientShellAgent {
+            pane_id: pane_id.into(),
+            workspace_id: workspace_id.into(),
+            tab_id: tab_id.into(),
+            name: None,
+            display_agent: None,
+            agent: None,
+            title: None,
+            terminal_title: None,
+            terminal_title_stripped: None,
+            agent_status: status,
+            state_change_seq: 1,
+            state_labels: Vec::new(),
+            tokens: Vec::new(),
+            focused: false,
+        }
+    }
+
+    fn make_test_snapshot() -> ClientShellSnapshot {
+        ClientShellSnapshot {
+            boot_id: "boot".into(),
+            revision: 1,
+            config_diagnostic: None,
+            product_announcement: None,
+            update_available: None,
+            update_install_command: "herdr update".into(),
+            server_keybindings_toml: None,
+            latest_release_notes_available: false,
+            integration_updates_available: false,
+            worktree_directory: "/tmp".into(),
+            release_notes: None,
+            focused_workspace_id: Some("ws_1".into()),
+            focused_tab_id: Some("tab_1".into()),
+            focused_pane_id: Some("pane_1".into()),
+            tab_bar_right: Vec::new(),
+            tab_bar_right_separator: " ".into(),
+            agent_view_label: None,
+            agent_order: Vec::new(),
+            workspaces: vec![ClientShellWorkspace {
+                workspace_id: "ws_1".into(),
+                active_tab_id: "tab_1".into(),
+                new_workspace_cwd: "/repo".into(),
+                number: 1,
+                label: "main".into(),
+                custom_label: false,
+                branch: None,
+                git_ahead_behind: None,
+                tokens: Vec::new(),
+                worktree: None,
+                focused: true,
+                agent_status: AgentStatus::Idle,
+            }],
+            tabs: vec![
+                ClientShellTab {
+                    focused: true,
+                    tab_id: "tab_1".into(),
+                    workspace_id: "ws_1".into(),
+                    number: 1,
+                    label: "1".into(),
+                    custom_label: false,
+                    zoomed: false,
+                    agent_status: AgentStatus::Idle,
+                },
+                ClientShellTab {
+                    focused: false,
+                    tab_id: "tab_2".into(),
+                    workspace_id: "ws_1".into(),
+                    number: 2,
+                    label: "2".into(),
+                    custom_label: false,
+                    zoomed: false,
+                    agent_status: AgentStatus::Idle,
+                },
+                ClientShellTab {
+                    focused: false,
+                    tab_id: "tab_3".into(),
+                    workspace_id: "ws_1".into(),
+                    number: 3,
+                    label: "3".into(),
+                    custom_label: false,
+                    zoomed: false,
+                    agent_status: AgentStatus::Idle,
+                },
+            ],
+            panes: vec![
+                ClientShellPane {
+                    pane_id: "pane_1".into(),
+                    workspace_id: "ws_1".into(),
+                    tab_id: "tab_1".into(),
+                    label: None,
+                    cwd: None,
+                    foreground_cwd: None,
+                    focused: true,
+                    right_click_passthrough: false,
+                },
+                ClientShellPane {
+                    pane_id: "pane_2a".into(),
+                    workspace_id: "ws_1".into(),
+                    tab_id: "tab_2".into(),
+                    label: None,
+                    cwd: None,
+                    foreground_cwd: None,
+                    focused: false,
+                    right_click_passthrough: false,
+                },
+                ClientShellPane {
+                    pane_id: "pane_2b".into(),
+                    workspace_id: "ws_1".into(),
+                    tab_id: "tab_2".into(),
+                    label: None,
+                    cwd: None,
+                    foreground_cwd: None,
+                    focused: false,
+                    right_click_passthrough: false,
+                },
+                ClientShellPane {
+                    pane_id: "pane_3".into(),
+                    workspace_id: "ws_1".into(),
+                    tab_id: "tab_3".into(),
+                    label: None,
+                    cwd: None,
+                    foreground_cwd: None,
+                    focused: false,
+                    right_click_passthrough: false,
+                },
+            ],
+            agents: vec![
+                make_agent("pane_1", "ws_1", "tab_1", AgentStatus::Working),
+                make_agent("pane_2a", "ws_1", "tab_2", AgentStatus::Working),
+                make_agent("pane_2b", "ws_1", "tab_2", AgentStatus::Blocked),
+            ],
+            commands: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_indicator_prefix_width() {
+        assert_eq!(tab_indicator_prefix_width(0, true), 0);
+        assert_eq!(tab_indicator_prefix_width(0, false), 0);
+        assert_eq!(tab_indicator_prefix_width(1, true), 2);
+        assert_eq!(tab_indicator_prefix_width(1, false), 2);
+        assert_eq!(tab_indicator_prefix_width(2, true), 4);
+        assert_eq!(tab_indicator_prefix_width(2, false), 3);
+        assert_eq!(tab_indicator_prefix_width(3, true), 6);
+        assert_eq!(tab_indicator_prefix_width(3, false), 4);
+    }
+
+    #[test]
+    fn test_tab_agent_statuses_defaults() {
+        let snapshot = make_test_snapshot();
+        let config = ClientShellConfig::from_config(&Config::default());
+
+        assert_eq!(
+            tab_agent_statuses("tab_1", &snapshot, &config),
+            vec![AgentStatus::Working]
+        );
+        assert_eq!(
+            tab_agent_statuses("tab_2", &snapshot, &config),
+            vec![AgentStatus::Working, AgentStatus::Blocked]
+        );
+        assert_eq!(
+            tab_agent_statuses("tab_3", &snapshot, &config),
+            Vec::<AgentStatus>::new()
+        );
+    }
+
+    #[test]
+    fn test_tab_agent_statuses_master_switch() {
+        let snapshot = make_test_snapshot();
+        let mut cfg = Config::default();
+        cfg.ui.tab_status = false;
+        let config = ClientShellConfig::from_config(&cfg);
+
+        assert!(tab_agent_statuses("tab_1", &snapshot, &config).is_empty());
+        assert!(tab_agent_statuses("tab_2", &snapshot, &config).is_empty());
+    }
+
+    #[test]
+    fn test_tab_agent_statuses_idle_filtering() {
+        let mut snapshot = make_test_snapshot();
+        snapshot
+            .agents
+            .push(make_agent("pane_3", "ws_1", "tab_3", AgentStatus::Idle));
+
+        let default_config = ClientShellConfig::from_config(&Config::default());
+        assert_eq!(
+            tab_agent_statuses("tab_3", &snapshot, &default_config),
+            vec![AgentStatus::Idle]
+        );
+
+        let mut cfg = Config::default();
+        cfg.ui.tab_status_idle = false;
+        let config_no_idle = ClientShellConfig::from_config(&cfg);
+        assert!(tab_agent_statuses("tab_3", &snapshot, &config_no_idle).is_empty());
+    }
+
+    #[test]
+    fn test_tab_agent_statuses_priority_order() {
+        let snapshot = make_test_snapshot();
+        let mut cfg = Config::default();
+        cfg.ui.tab_status_order = TabStatusOrderConfig::Priority;
+        let config = ClientShellConfig::from_config(&cfg);
+
+        // Blocked has higher priority than Working
+        assert_eq!(
+            tab_agent_statuses("tab_2", &snapshot, &config),
+            vec![AgentStatus::Blocked, AgentStatus::Working]
+        );
+    }
+
+    #[test]
+    fn test_tab_agent_statuses_max_capping() {
+        let snapshot = make_test_snapshot();
+        let mut cfg = Config::default();
+        cfg.ui.tab_status_max = 1;
+        let config_max_1 = ClientShellConfig::from_config(&cfg);
+
+        assert_eq!(
+            tab_agent_statuses("tab_2", &snapshot, &config_max_1),
+            vec![AgentStatus::Working]
+        );
+
+        cfg.ui.tab_status_order = TabStatusOrderConfig::Priority;
+        let config_priority_max_1 = ClientShellConfig::from_config(&cfg);
+        assert_eq!(
+            tab_agent_statuses("tab_2", &snapshot, &config_priority_max_1),
+            vec![AgentStatus::Blocked]
+        );
+    }
+
+    #[test]
+    fn test_render_tab_bar_default() {
+        let snapshot = make_test_snapshot();
+        let config = ClientShellConfig::from_config(&Config::default());
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buffer = Buffer::empty(area);
+        let mut tab_scroll = 0;
+        let mut reveal = false;
+        let mut hits = ShellHitMap::default();
+
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut tab_scroll,
+            &mut reveal,
+            None,
+            &mut hits,
+        );
+
+        assert_eq!(hits.tabs.len(), 3);
+        let row_text: String = (0..area.width)
+            .map(|x| buffer[(x, 0)].symbol().to_string())
+            .collect();
+
+        // Tab 1: focused, working: contains "● 1"
+        // Tab 2: unfocused, working + blocked: contains "● ● 2"
+        // Tab 3: unfocused, no agent: contains "3"
+        assert!(row_text.contains("● 1"));
+        assert!(row_text.contains("● ● 2"));
+        assert!(row_text.contains("3"));
+
+        // Check color of Tab 1 dot: yellow fg on accent bg
+        let tab1_rect = hits.tabs[0].0;
+        let dot_cell = (tab1_rect.x..tab1_rect.right())
+            .map(|x| &buffer[(x, 0)])
+            .find(|cell| cell.symbol() == "●")
+            .unwrap();
+        assert_eq!(dot_cell.style().fg, Some(config.palette.yellow));
+        assert_eq!(dot_cell.style().bg, Some(config.palette.accent));
+
+        // Check color of Tab 2 dots: yellow and red on surface0 bg
+        let tab2_rect = hits.tabs[1].0;
+        let tab2_dots: Vec<_> = (tab2_rect.x..tab2_rect.right())
+            .map(|x| &buffer[(x, 0)])
+            .filter(|cell| cell.symbol() == "●")
+            .collect();
+        assert_eq!(tab2_dots.len(), 2);
+        assert_eq!(tab2_dots[0].style().fg, Some(config.palette.yellow));
+        assert_eq!(tab2_dots[0].style().bg, Some(config.palette.surface0));
+        assert_eq!(tab2_dots[1].style().fg, Some(config.palette.red));
+        assert_eq!(tab2_dots[1].style().bg, Some(config.palette.surface0));
+    }
+
+    #[test]
+    fn test_render_tab_bar_compact_spacing() {
+        let snapshot = make_test_snapshot();
+        let mut cfg = Config::default();
+        cfg.ui.tab_status_spacing = false;
+        let config = ClientShellConfig::from_config(&cfg);
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buffer = Buffer::empty(area);
+        let mut tab_scroll = 0;
+        let mut reveal = false;
+        let mut hits = ShellHitMap::default();
+
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut tab_scroll,
+            &mut reveal,
+            None,
+            &mut hits,
+        );
+
+        let row_text: String = (0..area.width)
+            .map(|x| buffer[(x, 0)].symbol().to_string())
+            .collect();
+
+        // Compact: "●● 2" (no space between dots)
+        assert!(row_text.contains("●● 2"));
+    }
+
+    #[test]
+    fn test_render_tab_bar_symbols_and_priority() {
+        let snapshot = make_test_snapshot();
+        let mut cfg = Config::default();
+        cfg.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+        cfg.ui.tab_status_order = TabStatusOrderConfig::Priority;
+        let config = ClientShellConfig::from_config(&cfg);
+        let area = Rect::new(0, 0, 40, 1);
+        let mut buffer = Buffer::empty(area);
+        let mut tab_scroll = 0;
+        let mut reveal = false;
+        let mut hits = ShellHitMap::default();
+
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut tab_scroll,
+            &mut reveal,
+            None,
+            &mut hits,
+        );
+
+        let row_text: String = (0..area.width)
+            .map(|x| buffer[(x, 0)].symbol().to_string())
+            .collect();
+
+        // Symbols: Working is ◐, Blocked is ×
+        // Tab 1: "◐ 1"
+        // Tab 2: Priority order -> Blocked then Working: "× ◐ 2"
+        assert!(row_text.contains("◐ 1"));
+        assert!(row_text.contains("× ◐ 2"));
     }
 }

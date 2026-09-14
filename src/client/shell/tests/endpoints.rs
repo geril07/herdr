@@ -1601,7 +1601,7 @@ fn disconnected_active_endpoint_freezes_surface_and_marks_cached_ui_stale() {
     let stale_icon = buffer
         .content()
         .iter()
-        .find(|cell| cell.symbol() == "×")
+        .find(|cell| cell.symbol() == "×" && cell.fg == state.config.palette.overlay0)
         .expect("stale blocked icon");
     assert_eq!(stale_icon.fg, state.config.palette.overlay0);
 }

@@ -127,6 +127,14 @@ impl StatusIndicatorStyle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+pub enum TabStatusOrderConfig {
+    #[default]
+    Physical,
+    Priority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
     #[default]
     Auto,
@@ -984,6 +992,16 @@ pub struct UiConfig {
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
     /// Text inserted between visible right-side tab bar entries. Default: one space.
     pub tab_bar_right_separator: String,
+    /// Enable agent status indicators on tabs. Default: true.
+    pub tab_status: bool,
+    /// Show indicators for Idle agents. Default: true.
+    pub tab_status_idle: bool,
+    /// Maximum number of indicators per tab. Default: 3.
+    pub tab_status_max: usize,
+    /// Add space between multiple indicators. Default: true.
+    pub tab_status_spacing: bool,
+    /// Indicator order: "physical" or "priority". Default: "physical".
+    pub tab_status_order: TabStatusOrderConfig,
     /// Format for the outer terminal window title. Empty leaves the title alone.
     /// Default: "{hostname}: {workspace}".
     pub window_title: String,
@@ -1221,6 +1239,11 @@ impl Default for UiConfig {
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
+            tab_status: true,
+            tab_status_idle: true,
+            tab_status_max: 3,
+            tab_status_spacing: true,
+            tab_status_order: TabStatusOrderConfig::Physical,
             window_title: super::window_title::default_window_title(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             _legacy_agent_panel_scope: None,
@@ -1484,6 +1507,36 @@ status_indicators = "symbols"
         )
         .unwrap();
         assert_eq!(config.ui.status_indicators, StatusIndicatorStyle::Symbols);
+    }
+
+    #[test]
+    fn tab_status_defaults_and_parses() {
+        let default_config = Config::default();
+        assert!(default_config.ui.tab_status);
+        assert!(default_config.ui.tab_status_idle);
+        assert_eq!(default_config.ui.tab_status_max, 3);
+        assert!(default_config.ui.tab_status_spacing);
+        assert_eq!(
+            default_config.ui.tab_status_order,
+            TabStatusOrderConfig::Physical
+        );
+
+        let custom: Config = toml::from_str(
+            r#"
+[ui]
+tab_status = false
+tab_status_idle = false
+tab_status_max = 1
+tab_status_spacing = false
+tab_status_order = "priority"
+"#,
+        )
+        .unwrap();
+        assert!(!custom.ui.tab_status);
+        assert!(!custom.ui.tab_status_idle);
+        assert_eq!(custom.ui.tab_status_max, 1);
+        assert!(!custom.ui.tab_status_spacing);
+        assert_eq!(custom.ui.tab_status_order, TabStatusOrderConfig::Priority);
     }
 
     #[test]

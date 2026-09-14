@@ -143,6 +143,11 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            tab_status: config.ui.tab_status,
+            tab_status_idle: config.ui.tab_status_idle,
+            tab_status_max: config.ui.tab_status_max,
+            tab_status_spacing: config.ui.tab_status_spacing,
+            tab_status_order: config.ui.tab_status_order,
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -350,6 +355,11 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
+                self.tab_status = ui.tab_status;
+                self.tab_status_idle = ui.tab_status_idle;
+                self.tab_status_max = ui.tab_status_max;
+                self.tab_status_spacing = ui.tab_status_spacing;
+                self.tab_status_order = ui.tab_status_order;
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -503,6 +513,11 @@ mod tests {
         next.ui.tab_bar_position = TabBarPositionConfig::Bottom;
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+        next.ui.tab_status = false;
+        next.ui.tab_status_idle = false;
+        next.ui.tab_status_max = 5;
+        next.ui.tab_status_spacing = false;
+        next.ui.tab_status_order = crate::config::TabStatusOrderConfig::Priority;
         next.ui.sidebar.agents = toml::from_str("rows = [[{ token = 'machine', rules = [{ equals = 'Local', bold = true }] }]]\nrow_gap = 2").unwrap();
         next.keys.prefix = "ctrl+a".to_owned();
 
@@ -520,6 +535,14 @@ mod tests {
         assert_eq!(
             shell.status_indicators,
             crate::config::StatusIndicatorStyle::Symbols
+        );
+        assert!(!shell.tab_status);
+        assert!(!shell.tab_status_idle);
+        assert_eq!(shell.tab_status_max, 5);
+        assert!(!shell.tab_status_spacing);
+        assert_eq!(
+            shell.tab_status_order,
+            crate::config::TabStatusOrderConfig::Priority
         );
         assert_eq!(shell.agents.row_gap, 2);
         assert_eq!(
