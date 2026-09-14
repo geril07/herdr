@@ -2475,3 +2475,287 @@ fn navigator_foreign_tab_selection_keeps_the_tab_target() {
         }] if activated == &endpoint_id && tab_id == "tab_1"
     ));
 }
+
+#[test]
+fn navigator_clear_filters_requires_uppercase_f_and_retains_selection() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let set_filter_and_query = |state: &mut ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_mut().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        navigator.query = "pane 1".to_owned();
+        navigator.filter = Some(ClientNavigatorFilter::Idle);
+        navigator.selected = None;
+    };
+
+    let press = |state: &mut ClientShellState, code, modifiers| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))]);
+    };
+
+    let expected_current_selection = Some(ClientNavigatorTarget::Pane {
+        endpoint_id: state.active_endpoint_id.clone(),
+        pane_id: "pane_1".into(),
+    });
+
+    // Lowercase 'f' must NOT clear filters
+    set_filter_and_query(&mut state);
+    press(&mut state, KeyCode::Char('f'), KeyModifiers::empty());
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert_eq!(navigator.query, "pane 1");
+        assert_eq!(navigator.filter, Some(ClientNavigatorFilter::Idle));
+        assert_eq!(navigator.selected, None);
+    }
+
+    // Uppercase 'F' with Shift clears filters and retains current selection
+    set_filter_and_query(&mut state);
+    press(&mut state, KeyCode::Char('F'), KeyModifiers::SHIFT);
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert_eq!(navigator.query, "");
+        assert_eq!(navigator.filter, None);
+        assert_eq!(navigator.selected, expected_current_selection);
+    }
+
+    // Lowercase 'f' with Shift clears filters and retains current selection
+    set_filter_and_query(&mut state);
+    press(&mut state, KeyCode::Char('f'), KeyModifiers::SHIFT);
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert_eq!(navigator.query, "");
+        assert_eq!(navigator.filter, None);
+        assert_eq!(navigator.selected, expected_current_selection);
+    }
+
+    // Uppercase 'F' with empty modifiers (CapsLock) clears filters and retains current selection
+    set_filter_and_query(&mut state);
+    press(&mut state, KeyCode::Char('F'), KeyModifiers::empty());
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert_eq!(navigator.query, "");
+        assert_eq!(navigator.filter, None);
+        assert_eq!(navigator.selected, expected_current_selection);
+    }
+}
+
+#[test]
+fn navigator_collapse_all_workspaces_with_s_or_c() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(),
+        active_tab_id: "tab_2".into(),
+        new_workspace_cwd: "/repo2".into(),
+        number: 2,
+        label: "workspace-2".into(),
+        custom_label: false,
+        branch: Some("feature".into()),
+        git_ahead_behind: None,
+        tokens: Vec::new(),
+        worktree: None,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    snap.tabs.push(ClientShellTab {
+        tab_id: "tab_2".into(),
+        workspace_id: "ws_2".into(),
+        number: 1,
+        label: "1".into(),
+        custom_label: false,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    snap.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_2".into(),
+        tab_id: "tab_2".into(),
+        label: None,
+        cwd: Some("/repo2".into()),
+        foreground_cwd: Some("/repo2".into()),
+        focused: false,
+        right_click_passthrough: false,
+    });
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let press = |state: &mut ClientShellState, code| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code,
+            KeyModifiers::empty(),
+        ))]);
+    };
+
+    let row_count = |state: &ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator).len()
+    };
+
+    // Initially both workspaces are expanded: 6 rows
+    assert_eq!(row_count(&state), 6);
+
+    // Select pane_2 in workspace ws_2
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Pane {
+            endpoint_id: state.active_endpoint_id.clone(),
+            pane_id: "pane_2".into(),
+        });
+    }
+
+    // Press 'c' to collapse all workspaces
+    press(&mut state, KeyCode::Char('c'));
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert!(navigator.expanded_workspaces.is_empty());
+        assert_eq!(
+            navigator.selected,
+            Some(ClientNavigatorTarget::Workspace {
+                endpoint_id: state.active_endpoint_id.clone(),
+                workspace_id: "ws_2".into(),
+            })
+        );
+    }
+    // Only 2 workspace rows remain
+    assert_eq!(row_count(&state), 2);
+
+    // Expand again with 'e'
+    press(&mut state, KeyCode::Char('e'));
+    assert_eq!(row_count(&state), 6);
+
+    // Select tab_1 in workspace ws_1
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Tab {
+            endpoint_id: state.active_endpoint_id.clone(),
+            tab_id: "tab_1".into(),
+        });
+    }
+
+    // Press 's' to collapse all workspaces
+    press(&mut state, KeyCode::Char('s'));
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert!(navigator.expanded_workspaces.is_empty());
+        assert_eq!(
+            navigator.selected,
+            Some(ClientNavigatorTarget::Workspace {
+                endpoint_id: state.active_endpoint_id.clone(),
+                workspace_id: "ws_1".into(),
+            })
+        );
+    }
+    assert_eq!(row_count(&state), 2);
+}
+
+#[test]
+fn navigator_expand_all_workspaces_with_e() {
+    let mut config = Config::default();
+    config.ui.navigator_start_expanded = false;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snap = snapshot();
+    snap.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_2".into(),
+        active_tab_id: "tab_2".into(),
+        new_workspace_cwd: "/repo2".into(),
+        number: 2,
+        label: "workspace-2".into(),
+        custom_label: false,
+        branch: Some("feature".into()),
+        git_ahead_behind: None,
+        tokens: Vec::new(),
+        worktree: None,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    snap.tabs.push(ClientShellTab {
+        tab_id: "tab_2".into(),
+        workspace_id: "ws_2".into(),
+        number: 1,
+        label: "1".into(),
+        custom_label: false,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Idle,
+    });
+    snap.panes.push(ClientShellPane {
+        pane_id: "pane_2".into(),
+        workspace_id: "ws_2".into(),
+        tab_id: "tab_2".into(),
+        label: None,
+        cwd: Some("/repo2".into()),
+        foreground_cwd: Some("/repo2".into()),
+        focused: false,
+        right_click_passthrough: false,
+    });
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let row_count = |state: &ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator).len()
+    };
+
+    // Initially all workspaces are collapsed: 2 rows
+    assert_eq!(row_count(&state), 2);
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert!(navigator.expanded_workspaces.is_empty());
+    }
+
+    // Press 'e' to expand all workspaces
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        KeyCode::Char('e'),
+        KeyModifiers::empty(),
+    ))]);
+
+    {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        assert_eq!(navigator.expanded_workspaces.len(), 2);
+        assert!(navigator
+            .expanded_workspaces
+            .contains(&(state.active_endpoint_id.clone(), "ws_1".into())));
+        assert!(navigator
+            .expanded_workspaces
+            .contains(&(state.active_endpoint_id.clone(), "ws_2".into())));
+    }
+    // Now both workspaces are expanded: 6 rows
+    assert_eq!(row_count(&state), 6);
+}
