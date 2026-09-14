@@ -532,6 +532,42 @@ fn startup_config_diagnostics_are_client_rendered_and_persist_until_replaced() {
 }
 
 #[test]
+fn config_diagnostic_close_cell_hides_only_the_current_warning() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut endpoint_snapshot = snapshot();
+    endpoint_snapshot.config_diagnostic = Some("endpoint warning".into());
+    state.set_snapshot(Box::new(endpoint_snapshot.clone()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("diagnostic frame");
+
+    let dismiss = state.hits.config_diagnostic_dismiss;
+    assert!(!dismiss.is_empty());
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: dismiss.x,
+            row: dismiss.y,
+            modifiers: KeyModifiers::NONE,
+        })]);
+    assert!(outcome.repaint);
+    assert!(state.config_diagnostic.is_none());
+
+    state.set_snapshot(Box::new(endpoint_snapshot));
+    assert!(
+        state.config_diagnostic.is_none(),
+        "same warning stays hidden"
+    );
+
+    let mut changed_snapshot = snapshot();
+    changed_snapshot.config_diagnostic = Some("new endpoint warning".into());
+    state.set_snapshot(Box::new(changed_snapshot));
+    assert_eq!(
+        state.config_diagnostic.as_deref(),
+        Some("new endpoint warning")
+    );
+}
+
+#[test]
 fn config_diagnostic_offsets_only_the_pane_rows_it_overlaps() {
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.toast_delay_seconds = 0;

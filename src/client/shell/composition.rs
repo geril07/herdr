@@ -419,6 +419,7 @@ impl ClientShellState {
         }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         self.hits.notification_toast = Rect::default();
+        self.hits.config_diagnostic_dismiss = Rect::default();
         let has_config_diagnostic = self.config_diagnostic.is_some();
         let active_lifecycle = self
             .endpoints
@@ -439,13 +440,14 @@ impl ClientShellState {
                 } else {
                     layout.pane_surface
                 };
-                crate::ui::render_config_diagnostic_buffer(
+                let (_, dismiss) = crate::ui::render_config_diagnostic_buffer(
                     &mut composed,
                     diagnostic_area,
                     diagnostic,
                     &self.config.palette,
                     |rect| occlusion.cover(rect),
                 );
+                self.hits.config_diagnostic_dismiss = dismiss;
             }
             let lifecycle_offset = active_lifecycle.as_ref().map_or(0, |(label, status)| {
                 occlusion.cover(endpoint_notices::render_lifecycle_banner(
