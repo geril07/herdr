@@ -835,11 +835,84 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
+            let is_upper_f = code == KeyCode::Char('F')
+                || (code == KeyCode::Char('f') && modifiers.contains(KeyModifiers::SHIFT));
+            if is_upper_f && modifiers.difference(KeyModifiers::SHIFT).is_empty() {
+                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                    navigator.query.clear();
+                    navigator.filter = None;
+                    let rows = render::client_navigator_rows(
+                        &self.endpoints,
+                        &self.active_endpoint_id,
+                        navigator,
+                    );
+                    navigator.selected = rows
+                        .iter()
+                        .find(|row| row.current)
+                        .map(|row| row.target.clone());
+                }
+                outcome.repaint = true;
+                return;
+            }
             if code == KeyCode::Char('a') && modifiers.is_empty() {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     navigator.query.clear();
                     navigator.filter = None;
                     navigator.selected = None;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            if matches!(code, KeyCode::Char('s' | 'c')) && modifiers.is_empty() {
+                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                    navigator.expanded_workspaces.clear();
+                    let parent_workspace = match navigator.selected.as_ref() {
+                        Some(ClientNavigatorTarget::Tab {
+                            endpoint_id,
+                            tab_id,
+                        }) => self
+                            .endpoints
+                            .iter()
+                            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                            .and_then(|endpoint| endpoint.snapshot.as_deref())
+                            .and_then(|snapshot| {
+                                snapshot.tabs.iter().find(|tab| &tab.tab_id == tab_id)
+                            })
+                            .map(|tab| (endpoint_id.clone(), tab.workspace_id.clone())),
+                        Some(ClientNavigatorTarget::Pane {
+                            endpoint_id,
+                            pane_id,
+                        }) => self
+                            .endpoints
+                            .iter()
+                            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                            .and_then(|endpoint| endpoint.snapshot.as_deref())
+                            .and_then(|snapshot| {
+                                snapshot.panes.iter().find(|pane| &pane.pane_id == pane_id)
+                            })
+                            .map(|pane| (endpoint_id.clone(), pane.workspace_id.clone())),
+                        _ => None,
+                    };
+                    if let Some((endpoint_id, workspace_id)) = parent_workspace {
+                        navigator.selected = Some(ClientNavigatorTarget::Workspace {
+                            endpoint_id,
+                            workspace_id,
+                        });
+                    }
+                }
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('e') && modifiers.is_empty() {
+                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                    navigator.expanded_workspaces =
+                        super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
+                            .flat_map(|endpoint| {
+                                endpoint.snapshot.workspaces.iter().map(move |workspace| {
+                                    (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
+                                })
+                            })
+                            .collect();
                 }
                 outcome.repaint = true;
                 return;
