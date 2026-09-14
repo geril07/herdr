@@ -391,13 +391,18 @@ pub(super) fn navigator_rows(
                 let workspace_matches = filter(workspace.agent_status)
                     && (endpoint_query_matches || text(&workspace.label) || text(&workspace_meta));
                 if !filtering || workspace_matches || !children.is_empty() {
+                    let is_focused_workspace = endpoint.endpoint_id == *active_endpoint_id
+                        && snapshot.focused_workspace_id.as_deref()
+                            == Some(&workspace.workspace_id);
+                    let current = is_focused_workspace
+                        && (!expanded || !children.iter().any(|child| child.current));
                     endpoint_rows.push(ClientNavigatorRow {
                         depth: depth_offset,
                         label: workspace.label.clone(),
                         meta: workspace_meta,
                         status: None,
                         stale,
-                        current: false,
+                        current,
                         target: ClientNavigatorTarget::Workspace {
                             endpoint_id: endpoint.endpoint_id.clone(),
                             workspace_id: workspace.workspace_id.clone(),

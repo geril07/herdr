@@ -812,6 +812,7 @@ fn copy_search_owns_prompt_repeat_highlights_selection_and_restore() {
 #[test]
 fn navigator_renders_connected_siblings_and_ancestor_lines() {
     let mut snapshot = snapshot();
+    snapshot.focused_workspace_id = None;
     snapshot.focused_pane_id = None;
     snapshot.tabs[0].label = "editor".into();
     snapshot.panes[0].label = Some("agent".into());
