@@ -194,6 +194,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
 # navigate_workspace_up = "up"
 # navigate_workspace_down = "down"
+# navigate_workspace_open = "o"  # Enter always opens the selected workspace
 # navigate_pane_left = "h"      # left arrow always focuses the pane to the left
 # navigate_pane_down = "j"
 # navigate_pane_up = "k"

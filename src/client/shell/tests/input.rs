@@ -641,3 +641,38 @@ fn styled_client_composition_preserves_pane_hyperlinks() {
     let link = frame.cells[index].hyperlink.expect("linked cell") as usize;
     assert_eq!(frame.hyperlinks[link], "https://example.test");
 }
+
+#[test]
+fn russian_ctrl_word_erase_forwards_latin_ctrl_w() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+
+    // `ц` is physical `w`: without base-layout reporting the terminal sends
+    // only the Cyrillic codepoint with the Ctrl modifier.
+    let outcome = state.handle_input_bytes("\x1b[1094;5u".as_bytes());
+    let ClientMessage::ClientShellPaneInput { events, .. } = &outcome.requests[0] else {
+        panic!("expected targeted pane input");
+    };
+    assert!(matches!(
+        &events[..],
+        [ClientPaneInputEvent::Key {
+            code: crate::protocol::ClientKeyCode::Char('w'),
+            modifiers,
+            ..
+        }] if *modifiers == KeyModifiers::CONTROL.bits()
+    ));
+
+    // With base-layout reporting the result is identical.
+    let outcome = state.handle_input_bytes("\x1b[1094::119;5u".as_bytes());
+    let ClientMessage::ClientShellPaneInput { events, .. } = &outcome.requests[0] else {
+        panic!("expected targeted pane input");
+    };
+    assert!(matches!(
+        &events[..],
+        [ClientPaneInputEvent::Key {
+            code: crate::protocol::ClientKeyCode::Char('w'),
+            modifiers,
+            ..
+        }] if *modifiers == KeyModifiers::CONTROL.bits()
+    ));
+}

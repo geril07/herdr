@@ -308,6 +308,7 @@ pub struct CustomCommandKeybind {
 pub struct NavigateKeybinds {
     pub workspace_up: ActionKeybinds,
     pub workspace_down: ActionKeybinds,
+    pub workspace_open: ActionKeybinds,
     pub pane_left: ActionKeybinds,
     pub pane_down: ActionKeybinds,
     pub pane_up: ActionKeybinds,
@@ -481,6 +482,7 @@ impl Config {
             navigate: NavigateKeybinds {
                 workspace_up: empty_action!(),
                 workspace_down: empty_action!(),
+                workspace_open: empty_action!(),
                 pane_left: empty_action!(),
                 pane_down: empty_action!(),
                 pane_up: empty_action!(),
@@ -608,6 +610,11 @@ impl Config {
             apply_navigate!(
                 keybinds.navigate.workspace_down,
                 navigate_workspace_down,
+                source
+            );
+            apply_navigate!(
+                keybinds.navigate.workspace_open,
+                navigate_workspace_open,
                 source
             );
             apply_navigate!(keybinds.navigate.pane_left, navigate_pane_left, source);
@@ -1334,7 +1341,14 @@ pub fn key_event_matches_combo(key: &KeyEvent, combo: KeyCombo) -> bool {
 }
 
 pub fn terminal_key_matches_combo(key: &TerminalKey, combo: KeyCombo) -> bool {
-    key_parts_match_combo(key.code, key.modifiers, key.shifted_codepoint, combo)
+    // Layout-independent `Ctrl`/`Super` shortcuts: `ctrl+ц` matches `ctrl+w`.
+    let normalized = key.clone().normalized_for_shortcut();
+    key_parts_match_combo(
+        normalized.code,
+        normalized.modifiers,
+        normalized.shifted_codepoint,
+        combo,
+    )
 }
 
 fn key_parts_match_combo(
@@ -1825,6 +1839,7 @@ help = "prefix+ctrl+b"
 [keys]
 navigate_workspace_up = "j"
 navigate_workspace_down = "j"
+navigate_workspace_open = "o"
 navigate_pane_down = "ctrl+j"
 "#,
         )
@@ -1839,12 +1854,37 @@ navigate_pane_down = "ctrl+j"
         assert!(keybinds.navigate.workspace_down.bindings.is_empty());
         assert!(keybinds
             .navigate
+            .workspace_open
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('o'), KeyModifiers::empty())));
+        assert!(keybinds
+            .navigate
             .pane_down
             .matches_direct_key(&TerminalKey::new(KeyCode::Char('j'), KeyModifiers::CONTROL)));
         assert!(diagnostics.iter().any(|diag| {
             diag.contains("kept keys.navigate_workspace_up")
                 && diag.contains("disabled keys.navigate_workspace_down")
         }));
+    }
+
+    #[test]
+    fn ctrl_shortcuts_match_russian_layout_keys() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+navigate_pane_down = "ctrl+j"
+"#,
+        )
+        .unwrap();
+        let keybinds = config.keybinds();
+
+        assert!(keybinds
+            .navigate
+            .pane_down
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('о'), KeyModifiers::CONTROL)));
+        assert!(!keybinds
+            .navigate
+            .pane_down
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('о'), KeyModifiers::empty())));
     }
 
     #[test]
