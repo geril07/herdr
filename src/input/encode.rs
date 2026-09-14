@@ -26,7 +26,20 @@ pub fn encode_terminal_key(key: TerminalKey, protocol: KeyboardProtocol) -> Vec<
     // Layout-independent `Ctrl`/`Super` shortcuts: `ctrl+ц` must reach the pane
     // as `ctrl+w` (and `ctrl+о` as `ctrl+j`/LF), using the Kitty base-layout key
     // when reported, else the Russian fallback table. Plain typing is untouched.
+    // Normalized first so the Super preservation below encodes the Latin base.
     let key = key.normalized_for_shortcut();
+
+    // Super has no legacy character encoding. Preserve the chord with CSI-u
+    // instead of leaking the unmodified character into the pane.
+    if matches!(protocol, KeyboardProtocol::Legacy)
+        && key.kind != crossterm::event::KeyEventKind::Release
+        && matches!(key.code, KeyCode::Char(_))
+        && key.modifiers.contains(KeyModifiers::SUPER)
+    {
+        if let Some(bytes) = try_encode_csi_u(&key, 0) {
+            return bytes;
+        }
+    }
 
     // REPORT_ALL_KEYS must retain physical press/repeat/release semantics instead of
     // reducing a native key to its layout-generated text.
@@ -1235,6 +1248,19 @@ mod tests {
                 parse_terminal_key_sequence(std::str::from_utf8(&encoded).unwrap()).unwrap();
             assert_terminal_key_eq(parsed, key.code, key.modifiers, key.kind, None);
         }
+    }
+
+    #[test]
+    fn legacy_super_character_preserves_csi_u_chord() {
+        let sequence = "\x1b[99;9u";
+        let key = parse_terminal_key_sequence(sequence).expect("Super+C CSI-u key");
+
+        assert_eq!(key.code, KeyCode::Char('c'));
+        assert_eq!(key.modifiers, KeyModifiers::SUPER);
+        assert_eq!(
+            encode_terminal_key(key, KeyboardProtocol::Legacy),
+            sequence.as_bytes()
+        );
     }
 
     #[test]
