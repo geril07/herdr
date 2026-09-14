@@ -950,6 +950,12 @@ pub struct UiConfig {
     pub prompt_new_tab_name: bool,
     /// Ask for a workspace name before interactive creation. Default: false.
     pub prompt_new_workspace_name: bool,
+    /// Start the session navigator with all workspaces expanded. Default: true.
+    /// Set false for a tmux-style sessions-only list; Space still expands one workspace.
+    pub navigator_start_expanded: bool,
+    /// Focus the session navigator search field on open. Default: false.
+    /// Set true for fzf-style type-to-filter with Ctrl+n/Ctrl+p navigation.
+    pub navigator_start_search_focused: bool,
     /// Draw borders around split panes. auto draws them only for split panes,
     /// always also frames a lone pane (only while pane_outer_borders is
     /// enabled, since every edge of a lone pane is an outer edge), off
@@ -1197,6 +1203,8 @@ impl Default for UiConfig {
             confirm_tab_close: true,
             prompt_new_tab_name: true,
             prompt_new_workspace_name: false,
+            navigator_start_expanded: true,
+            navigator_start_search_focused: false,
             pane_borders: PaneBordersConfig::Auto,
             pane_outer_borders: true,
             pane_scrollbars: true,
@@ -1709,6 +1717,22 @@ sidebar_start_collapsed = true
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.ui.sidebar_start_collapsed);
+    }
+
+    #[test]
+    fn navigator_start_presets_default_expanded_unfocused_and_parse() {
+        let default_config = Config::default();
+        assert!(default_config.ui.navigator_start_expanded);
+        assert!(!default_config.ui.navigator_start_search_focused);
+
+        let toml = r#"
+[ui]
+navigator_start_expanded = false
+navigator_start_search_focused = true
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.ui.navigator_start_expanded);
+        assert!(config.ui.navigator_start_search_focused);
     }
 
     #[test]
