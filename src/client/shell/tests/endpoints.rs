@@ -1789,6 +1789,108 @@ fn navigator_start_presets_control_expansion_and_search_focus() {
 }
 
 #[test]
+fn navigator_default_selection_targets_focused_workspace_or_pane() {
+    let mut config = Config::default();
+    config.ui.navigator_start_expanded = false;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snap = snapshot();
+    let mut second_workspace = snap.workspaces[0].clone();
+    second_workspace.workspace_id = "ws_2".into();
+    second_workspace.active_tab_id = "tab_2".into();
+    second_workspace.number = 2;
+    second_workspace.label = "second-workspace".into();
+    second_workspace.focused = true;
+    snap.workspaces[0].focused = false;
+    snap.workspaces.push(second_workspace);
+
+    let mut second_tab = snap.tabs[0].clone();
+    second_tab.tab_id = "tab_2".into();
+    second_tab.workspace_id = "ws_2".into();
+    second_tab.number = 2;
+    second_tab.label = "2".into();
+    second_tab.focused = true;
+    snap.tabs[0].focused = false;
+    snap.tabs.push(second_tab);
+
+    let mut second_pane = snap.panes[0].clone();
+    second_pane.pane_id = "pane_2".into();
+    second_pane.workspace_id = "ws_2".into();
+    second_pane.tab_id = "tab_2".into();
+    second_pane.focused = true;
+    snap.panes[0].focused = false;
+    snap.panes.push(second_pane);
+
+    snap.focused_workspace_id = Some("ws_2".into());
+    snap.focused_tab_id = Some("tab_2".into());
+    snap.focused_pane_id = Some("pane_2".into());
+
+    state.set_snapshot(Box::new(snap.clone()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    // When navigator_start_expanded is false, default selection starts on the current focused workspace.
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: "ws_2".into(),
+        })
+    );
+    assert_eq!(
+        aggregate_navigation::navigator_selected_index(&rows, navigator),
+        Some(1)
+    );
+    assert_eq!(rows.iter().filter(|row| row.current).count(), 1);
+    assert!(rows[1].current);
+
+    // When expanded, default selection starts on the current focused pane.
+    config.ui.navigator_start_expanded = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Pane {
+            endpoint_id: state.active_endpoint_id.clone(),
+            pane_id: "pane_2".into(),
+        })
+    );
+    let selected_index = aggregate_navigation::navigator_selected_index(&rows, navigator);
+    assert!(selected_index.is_some());
+    assert_eq!(
+        rows[selected_index.unwrap()].target,
+        navigator.selected.clone().unwrap()
+    );
+    assert_eq!(rows.iter().filter(|row| row.current).count(), 1);
+    assert!(rows[selected_index.unwrap()].current);
+    let ws_2_row = rows
+        .iter()
+        .find(|row| {
+            matches!(
+                &row.target,
+                ClientNavigatorTarget::Workspace { workspace_id, .. } if workspace_id == "ws_2"
+            )
+        })
+        .expect("ws_2 row");
+    assert!(!ws_2_row.current);
+}
+
+#[test]
 fn navigator_ctrl_n_p_moves_selection_without_search_focus() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));
