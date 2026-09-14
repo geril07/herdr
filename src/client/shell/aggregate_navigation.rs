@@ -451,6 +451,12 @@ pub(super) fn navigator_rows(
                     || !children.is_empty()
                     || (navigator.filter.is_none() && !query.is_empty() && workspace_matches)
                 {
+                    // Mark the focused workspace only when none of its visible
+                    // panes already claim the marker; otherwise the popup would
+                    // open on the workspace row instead of the focused pane.
+                    let is_focused_workspace = endpoint.endpoint_id == *active_endpoint_id
+                        && snapshot.focused_workspace_id.as_deref()
+                            == Some(&workspace.workspace_id);
                     endpoint_rows.push(ClientNavigatorRow {
                         depth: depth_offset,
                         label: workspace.label.clone(),
@@ -459,7 +465,8 @@ pub(super) fn navigator_rows(
                         agent: None,
                         status: None,
                         stale,
-                        current: false,
+                        current: is_focused_workspace
+                            && !children.iter().any(|child| child.current),
                         target: ClientNavigatorTarget::Workspace {
                             endpoint_id: endpoint.endpoint_id.clone(),
                             workspace_id: workspace.workspace_id.clone(),

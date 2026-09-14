@@ -2845,3 +2845,135 @@ fn navigator_orders_worktree_groups_like_spaces_panel() {
         "the grouped parent and its child lead, standalone workspaces follow"
     );
 }
+
+fn two_workspace_focused_on_second_snapshot() -> ClientShellSnapshot {
+    let mut snap = snapshot();
+    let mut second_workspace = snap.workspaces[0].clone();
+    second_workspace.workspace_id = "ws_2".into();
+    second_workspace.active_tab_id = "tab_2".into();
+    second_workspace.number = 2;
+    second_workspace.label = "second-workspace".into();
+    second_workspace.focused = true;
+    snap.workspaces[0].focused = false;
+    snap.workspaces.push(second_workspace);
+
+    let mut second_tab = snap.tabs[0].clone();
+    second_tab.tab_id = "tab_2".into();
+    second_tab.workspace_id = "ws_2".into();
+    second_tab.number = 2;
+    second_tab.label = "2".into();
+    second_tab.focused = true;
+    snap.tabs[0].focused = false;
+    snap.tabs.push(second_tab);
+
+    let mut second_pane = snap.panes[0].clone();
+    second_pane.pane_id = "pane_2".into();
+    second_pane.workspace_id = "ws_2".into();
+    second_pane.tab_id = "tab_2".into();
+    second_pane.focused = true;
+    snap.panes[0].focused = false;
+    snap.panes.push(second_pane);
+
+    snap.focused_workspace_id = Some("ws_2".into());
+    snap.focused_tab_id = Some("tab_2".into());
+    snap.focused_pane_id = Some("pane_2".into());
+    snap
+}
+
+#[test]
+fn navigator_start_search_focused_preset_focuses_the_query_field() {
+    for start_search_focused in [false, true] {
+        let mut config = Config::default();
+        config.ui.navigator_start_search_focused = start_search_focused;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.open_navigator_overlay();
+        let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+            panic!("navigator should be open");
+        };
+        assert_eq!(
+            navigator.search_focused, start_search_focused,
+            "navigator_start_search_focused={start_search_focused}"
+        );
+    }
+}
+
+#[test]
+fn navigator_default_selection_targets_focused_workspace_or_pane() {
+    let mut config = Config::default();
+    config.ui.navigator_start_expanded = false;
+    let snap = two_workspace_focused_on_second_snapshot();
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snap.clone()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    // Collapsed: the workspace row carries the marker and owns the selection.
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: "ws_2".into(),
+        })
+    );
+    assert_eq!(
+        aggregate_navigation::navigator_selected_index(&rows, navigator),
+        Some(1)
+    );
+    assert_eq!(rows.iter().filter(|row| row.current).count(), 1);
+    assert!(rows[1].current);
+
+    // Expanded: the focused pane takes the marker, so the popup opens on the pane.
+    config.ui.navigator_start_expanded = true;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Pane {
+            endpoint_id: state.active_endpoint_id.clone(),
+            pane_id: "pane_2".into(),
+        })
+    );
+    let selected_index =
+        aggregate_navigation::navigator_selected_index(&rows, navigator).expect("selected row");
+    assert_eq!(
+        rows[selected_index].target,
+        navigator.selected.clone().unwrap()
+    );
+    assert_eq!(
+        rows.iter().filter(|row| row.current).count(),
+        1,
+        "only the focused pane keeps the marker"
+    );
+    assert!(rows[selected_index].current);
+    let ws_2_row = rows
+        .iter()
+        .find(|row| {
+            matches!(
+                &row.target,
+                ClientNavigatorTarget::Workspace { workspace_id, .. } if workspace_id == "ws_2"
+            )
+        })
+        .expect("ws_2 row");
+    assert!(
+        !ws_2_row.current,
+        "the workspace row must yield the marker to its focused pane"
+    );
+}
