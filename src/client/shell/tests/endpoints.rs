@@ -1870,6 +1870,37 @@ fn navigator_space_keeps_selection_and_collapses_to_parent() {
 }
 
 #[test]
+fn navigator_search_ctrl_w_deletes_word_back() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let query = |state: &mut ClientShellState| {
+        let ClientShellOverlay::Navigator(navigator) = state.overlay.as_mut().expect("navigator")
+        else {
+            panic!("expected navigator");
+        };
+        navigator.query.clone()
+    };
+    let press = |state: &mut ClientShellState, code, modifiers| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))]);
+    };
+    press(&mut state, KeyCode::Char('/'), KeyModifiers::empty());
+    state.handle_input_bytes(b"foo bar  ");
+    assert_eq!(query(&mut state), "foo bar  ");
+    press(&mut state, KeyCode::Char('w'), KeyModifiers::CONTROL);
+    assert_eq!(query(&mut state), "foo ");
+    press(&mut state, KeyCode::Char('w'), KeyModifiers::CONTROL);
+    assert_eq!(query(&mut state), "");
+    // Ctrl+u still clears the whole query.
+    state.handle_input_bytes(b"foo bar");
+    press(&mut state, KeyCode::Char('u'), KeyModifiers::CONTROL);
+    assert_eq!(query(&mut state), "");
+}
+
+#[test]
 fn navigator_keeps_saved_machine_visible_before_metadata_arrives() {
     let (mut state, endpoint_id) = state_with_remote();
     let endpoint = state

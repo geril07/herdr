@@ -718,6 +718,21 @@ impl ClientShellState {
                         navigator.query.pop();
                         navigator.filter = None;
                         navigator.selected = None;
+                    } else if code == KeyCode::Char('w')
+                        && modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        // Shell-style word delete: drop trailing blanks, then
+                        // the word before them. Ctrl+u still clears the line.
+                        let trimmed = navigator.query.trim_end().to_owned();
+                        let cut = trimmed
+                            .char_indices()
+                            .rev()
+                            .find(|(_, character)| character.is_whitespace())
+                            .map(|(index, character)| index + character.len_utf8())
+                            .unwrap_or(0);
+                        navigator.query.truncate(cut);
+                        navigator.filter = None;
+                        navigator.selected = None;
                     } else if let KeyCode::Char(character) = code {
                         if modifiers.difference(KeyModifiers::SHIFT).is_empty() {
                             navigator.filter = None;
