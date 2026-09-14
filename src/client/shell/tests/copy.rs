@@ -969,6 +969,10 @@ fn navigator_workspace_headings_use_the_active_themes_primary_text() {
 #[test]
 fn navigator_renders_every_terminal_in_workspace_sections() {
     let mut snapshot = snapshot();
+    // This test is about tree connectors and labels, so leave no row marked
+    // current: the focused pane is already cleared and the focused workspace
+    // would otherwise take the marker and shift the connector column.
+    snapshot.focused_workspace_id = None;
     snapshot.focused_pane_id = None;
     snapshot.tabs[0].label = "editor".into();
     snapshot.panes[0].label = Some("agent".into());
