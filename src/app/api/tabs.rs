@@ -155,15 +155,18 @@ impl App {
         else {
             return tab_not_found(id, &params.tab_id);
         };
-        tab.set_custom_name(params.label.clone());
+        tab.set_custom_name(params.label);
         crate::logging::tab_renamed(&workspace_id, &tab_id);
         self.schedule_session_save();
+        let label = self.state.workspaces[ws_idx]
+            .tab_display_name(tab_idx)
+            .unwrap_or_default();
         self.emit_event(EventEnvelope {
             event: EventKind::TabRenamed,
             data: EventData::TabRenamed {
                 tab_id: self.public_tab_id(ws_idx, tab_idx).unwrap(),
                 workspace_id: self.public_workspace_id(ws_idx),
-                label: params.label,
+                label,
             },
         });
         let tab = self.tab_info(ws_idx, tab_idx).unwrap();
@@ -472,5 +475,79 @@ mod tests {
             crate::worktree::canonical_or_original(&cached_cwd)
         );
         shutdown_test_runtimes(&mut app);
+    }
+
+    fn rename_test_app(event_hub: &crate::api::EventHub) -> (App, String) {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            event_hub.clone(),
+        );
+        let mut workspace = Workspace::test_new("tabs");
+        workspace.tabs[0].set_custom_name("logs".into());
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let tab_id = app.public_tab_id(0, 0).unwrap();
+        (app, tab_id)
+    }
+
+    #[test]
+    fn api_tab_rename_empty_label_falls_back_to_default() {
+        let event_hub = crate::api::EventHub::default();
+        let (mut app, tab_id) = rename_test_app(&event_hub);
+
+        let response = app.handle_tab_rename(
+            "req".into(),
+            TabRenameParams {
+                tab_id: tab_id.clone(),
+                label: "   ".into(),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::TabInfo { tab } = success.result else {
+            panic!("expected tab info");
+        };
+        assert_eq!(tab.label, "1");
+        assert!(app.state.workspaces[0].tabs[0].is_auto_named());
+        let events = event_hub.events_after(0);
+        assert!(events.iter().any(|(_, event)| {
+            matches!(
+                &event.data,
+                EventData::TabRenamed {
+                    tab_id: renamed_id,
+                    label,
+                    ..
+                } if renamed_id == &tab_id && label == "1"
+            )
+        }));
+    }
+
+    #[test]
+    fn api_tab_rename_trims_label() {
+        let event_hub = crate::api::EventHub::default();
+        let (mut app, tab_id) = rename_test_app(&event_hub);
+
+        let response = app.handle_tab_rename(
+            "req".into(),
+            TabRenameParams {
+                tab_id,
+                label: "  ops  ".into(),
+            },
+        );
+
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::TabInfo { tab } = success.result else {
+            panic!("expected tab info");
+        };
+        assert_eq!(tab.label, "ops");
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("ops")
+        );
     }
 }
