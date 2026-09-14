@@ -76,6 +76,14 @@ pub struct TerminalKey {
     pub kind: crossterm::event::KeyEventKind,
     pub repeat_count: u16,
     pub shifted_codepoint: Option<u32>,
+    /// Kitty keyboard protocol "base layout key": the codepoint the same
+    /// physical key produces on a standard PC-101/QWERTY layout. Terminals
+    /// send this when `REPORT_ALTERNATE_KEYS` is active, e.g. Cyrillic `ц`
+    /// reports base `w`, so `ctrl+ц` can resolve to `ctrl+w`. Distinct from
+    /// `shifted_codepoint`, which is shift state, not layout information.
+    /// `None` when the terminal omits it (many terminals send only
+    /// `CSI 1094;5u`); callers fall back to the static Cyrillic table below.
+    pub base_layout_codepoint: Option<u32>,
     pub generated_text: Option<String>,
     physical_identity_hint: bool,
     windows_dead_key: bool,
@@ -90,6 +98,7 @@ impl TerminalKey {
             kind: crossterm::event::KeyEventKind::Press,
             repeat_count: 1,
             shifted_codepoint: None,
+            base_layout_codepoint: None,
             generated_text: None,
             physical_identity_hint: false,
             windows_dead_key: false,
@@ -122,6 +131,57 @@ impl TerminalKey {
 
     pub fn with_shifted_codepoint(mut self, shifted_codepoint: u32) -> Self {
         self.shifted_codepoint = Some(shifted_codepoint);
+        self
+    }
+
+    pub fn with_base_layout_codepoint(mut self, base_layout_codepoint: u32) -> Self {
+        self.base_layout_codepoint = Some(base_layout_codepoint);
+        self
+    }
+
+    /// Layout-independent base character for `Ctrl`/`Super` shortcuts.
+    ///
+    /// Prefers the terminal-reported Kitty base-layout key when it is ASCII,
+    /// otherwise falls back to the static Russian `ЙЦУКЕН` table. Returns
+    /// `None` for ASCII input (no resolution needed) and for non-Cyrillic
+    /// scripts without a reported base key.
+    pub fn shortcut_base_char(&self) -> Option<char> {
+        let KeyCode::Char(ch) = self.code else {
+            return None;
+        };
+        if ch.is_ascii() {
+            return None;
+        }
+        if let Some(base) = self.base_layout_codepoint.and_then(char::from_u32) {
+            if base.is_ascii() {
+                return Some(base);
+            }
+        }
+        cyrillic_to_latin_shortcut_base(ch)
+    }
+
+    /// Normalized copy for shortcut matching and pane forwarding.
+    ///
+    /// When `Ctrl` or `Super` is held with a non-ASCII character, replaces the
+    /// code with the layout-independent Latin base (terminal-reported or
+    /// Russian fallback). Plain typing, `Shift`-only capitals, and `Alt`-only
+    /// chords keep the original character so text input is untouched.
+    pub fn normalized_for_shortcut(mut self) -> Self {
+        let wants_layout_resolution = self.modifiers.contains(KeyModifiers::CONTROL)
+            || self.modifiers.contains(KeyModifiers::SUPER);
+        if !wants_layout_resolution {
+            return self;
+        }
+        let Some(latin) = self.shortcut_base_char() else {
+            return self;
+        };
+        self.code = KeyCode::Char(latin);
+        if self
+            .shifted_codepoint
+            .is_some_and(|cp| char::from_u32(cp).is_none_or(|shifted| !shifted.is_ascii()))
+        {
+            self.shifted_codepoint = None;
+        }
         self
     }
 
@@ -255,6 +315,52 @@ impl From<KeyEvent> for TerminalKey {
     fn from(value: KeyEvent) -> Self {
         Self::new(value.code, value.modifiers).with_kind(value.kind)
     }
+}
+
+/// Russian `ЙЦУКЕН` physical-key fallback for `Ctrl`/`Super` shortcuts.
+///
+/// Maps the Cyrillic character to the Latin character on the same PC-101 key,
+/// e.g. `ц`/`Ц` to `w`, `о`/`О` to `j`. Only letters that share a physical key
+/// with an ASCII letter are covered, plus `[`/`]` (`х`/`ъ`, where `Ctrl+[`
+/// is `Esc`). Used when the terminal omits the Kitty base-layout key; many
+/// terminals send only `CSI 1094;5u` even with alternate-key reporting.
+/// Returns lowercase Latin; `Ctrl` handling is case-insensitive.
+pub fn cyrillic_to_latin_shortcut_base(ch: char) -> Option<char> {
+    Some(match ch {
+        'й' | 'Й' => 'q',
+        'ц' | 'Ц' => 'w',
+        'у' | 'У' => 'e',
+        'к' | 'К' => 'r',
+        'е' | 'Е' => 't',
+        'н' | 'Н' => 'y',
+        'г' | 'Г' => 'u',
+        'ш' | 'Ш' => 'i',
+        'щ' | 'Щ' => 'o',
+        'з' | 'З' => 'p',
+        'х' | 'Х' => '[',
+        'ъ' | 'Ъ' => ']',
+        'ф' | 'Ф' => 'a',
+        'ы' | 'Ы' => 's',
+        'в' | 'В' => 'd',
+        'а' | 'А' => 'f',
+        'п' | 'П' => 'g',
+        'р' | 'Р' => 'h',
+        'о' | 'О' => 'j',
+        'л' | 'Л' => 'k',
+        'д' | 'Д' => 'l',
+        'ж' | 'Ж' => ';',
+        'э' | 'Э' => '\'',
+        'я' | 'Я' => 'z',
+        'ч' | 'Ч' => 'x',
+        'с' | 'С' => 'c',
+        'м' | 'М' => 'v',
+        'и' | 'И' => 'b',
+        'т' | 'Т' => 'n',
+        'ь' | 'Ь' => 'm',
+        'б' | 'Б' => ',',
+        'ю' | 'Ю' => '.',
+        _ => return None,
+    })
 }
 
 pub(crate) const KITTY_FLAG_REPORT_ALL_KEYS: u16 = 0b0000_1000;
@@ -553,5 +659,48 @@ mod tests {
             host_modify_other_keys_mode_for_env(false, None, false, false),
             None
         );
+    }
+
+    #[test]
+    fn cyrillic_fallback_covers_ctrl_word_and_newline_keys() {
+        assert_eq!(cyrillic_to_latin_shortcut_base('ц'), Some('w'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('Ц'), Some('w'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('о'), Some('j'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('О'), Some('j'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('ф'), Some('a'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('с'), Some('c'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('в'), Some('d'));
+        assert_eq!(cyrillic_to_latin_shortcut_base('х'), Some('['));
+        assert_eq!(cyrillic_to_latin_shortcut_base('w'), None);
+        assert_eq!(cyrillic_to_latin_shortcut_base('文'), None);
+    }
+
+    #[test]
+    fn shortcut_base_prefers_terminal_reported_base_key() {
+        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::CONTROL)
+            .with_base_layout_codepoint('w' as u32);
+        assert_eq!(key.shortcut_base_char(), Some('w'));
+    }
+
+    #[test]
+    fn shortcut_normalization_applies_only_to_ctrl_and_super() {
+        let ctrl =
+            TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::CONTROL).normalized_for_shortcut();
+        assert_eq!(ctrl.code, KeyCode::Char('w'));
+
+        let latin =
+            TerminalKey::new(KeyCode::Char('w'), KeyModifiers::CONTROL).normalized_for_shortcut();
+        assert_eq!(latin.code, KeyCode::Char('w'));
+
+        let plain =
+            TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::empty()).normalized_for_shortcut();
+        assert_eq!(plain.code, KeyCode::Char('ц'));
+
+        let alt = TerminalKey::new(KeyCode::Char('ф'), KeyModifiers::ALT).normalized_for_shortcut();
+        assert_eq!(alt.code, KeyCode::Char('ф'));
+
+        let shift =
+            TerminalKey::new(KeyCode::Char('Ц'), KeyModifiers::SHIFT).normalized_for_shortcut();
+        assert_eq!(shift.code, KeyCode::Char('Ц'));
     }
 }
