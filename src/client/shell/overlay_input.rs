@@ -1085,6 +1085,8 @@ impl ClientShellState {
                         if confirm.tab_target.is_none() && confirm.pane_target.is_none() {
                             self.mode = ClientShellMode::Navigate;
                             self.navigate_workspace_id = self.focused_navigation_target();
+                            self.navigate_agent = self.initial_agent_target();
+                            self.navigate_section = SidebarNavSection::Spaces;
                             self.reveal_navigation_workspace = true;
                         }
                     }
