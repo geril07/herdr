@@ -207,7 +207,6 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
             b"D",
             b"\x1b[D",
             b"\x1b[C",
-            b"\t",
             b"1",
             b"c",
             b"N",
@@ -216,6 +215,14 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
             assert!(state.overlay.is_none());
             assert_eq!(state.mode, ClientShellMode::Navigate);
         }
+        // Tab is a recovery path between sections even when the
+        // workspace preview is foreign.
+        preview_key(&mut state, b"\t");
+        assert_eq!(state.navigate_section, SidebarNavSection::Agents);
+        assert_eq!(state.mode, ClientShellMode::Navigate);
+        preview_key(&mut state, b"\x1b[Z");
+        assert_eq!(state.navigate_section, SidebarNavSection::Spaces);
+        assert_eq!(state.mode, ClientShellMode::Navigate);
     }
     assert_selected(&state, &remote, "ws_1");
     let mut remote_snapshot = workspaces(2);
