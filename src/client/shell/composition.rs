@@ -35,13 +35,20 @@ impl ClientShellState {
         } else {
             Rect::new(0, 1, cols, rows.saturating_sub(2))
         };
+        // Only the active navigate section highlights. Both sections can hold a
+        // preview at once, so scoping keeps a stale highlight from the other
+        // section visible in the sidebar.
+        let agents_section = self.mode == ClientShellMode::Navigate
+            && self.navigate_section == SidebarNavSection::Agents;
         let valid_navigation_target = self.mode == ClientShellMode::Navigate
+            && !agents_section
             && self
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
 
         let valid_agent_target = self.mode == ClientShellMode::Navigate
+            && agents_section
             && self
                 .navigate_agent
                 .as_ref()
@@ -166,13 +173,20 @@ impl ClientShellState {
             self.reveal_mobile_workspace = true;
         }
         self.last_composed_size = Some((cols, rows));
+        // Only the active navigate section highlights. Both sections can hold a
+        // preview at once, so scoping keeps a stale highlight from the other
+        // section visible in the sidebar.
+        let agents_section = self.mode == ClientShellMode::Navigate
+            && self.navigate_section == SidebarNavSection::Agents;
         let valid_navigation_target = self.mode == ClientShellMode::Navigate
+            && !agents_section
             && self
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
 
         let valid_agent_target = self.mode == ClientShellMode::Navigate
+            && agents_section
             && self
                 .navigate_agent
                 .as_ref()
