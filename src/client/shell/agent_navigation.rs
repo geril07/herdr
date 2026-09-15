@@ -70,6 +70,11 @@ impl ClientShellState {
         })
     }
 
+    pub(super) fn initial_agent_target(&self) -> Option<AgentNavigationTarget> {
+        self.focused_agent_target()
+            .or_else(|| self.navigation_agent_targets().into_iter().next())
+    }
+
     pub(super) fn navigation_agent_valid(&self, target: &AgentNavigationTarget) -> bool {
         self.endpoints.iter().any(|endpoint| {
             endpoint.endpoint_id == target.endpoint_id
@@ -98,9 +103,19 @@ impl ClientShellState {
         self.reveal_mobile_workspace = false;
         self.mode = ClientShellMode::Navigate;
         self.navigate_workspace_id = self.focused_navigation_target();
-        self.navigate_agent = self.focused_agent_target();
+        self.navigate_agent = self.initial_agent_target();
         self.navigate_section = section;
         self.reveal_navigation_workspace = true;
+        if section == SidebarNavSection::Agents {
+            if let Some(index) = self.navigate_agent.as_ref().and_then(|selected| {
+                self.navigation_agent_targets()
+                    .iter()
+                    .position(|target| target == selected)
+            }) {
+                // Render clamps to the live max; stale hit state must not pin this.
+                self.agent_scroll = index;
+            }
+        }
     }
 
     pub(super) fn clear_navigate_preview(&mut self) {
@@ -123,7 +138,7 @@ impl ClientShellState {
             }
             SidebarNavSection::Agents => {
                 if self.navigate_agent.is_none() {
-                    self.navigate_agent = self.focused_agent_target();
+                    self.navigate_agent = self.initial_agent_target();
                 }
                 if let Some(index) = self.navigate_agent.as_ref().and_then(|selected| {
                     self.navigation_agent_targets()

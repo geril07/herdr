@@ -1321,7 +1321,7 @@ impl ClientShellState {
                 if workspace_close {
                     self.mode = ClientShellMode::Navigate;
                     self.navigate_workspace_id = self.focused_navigation_target();
-                    self.navigate_agent = self.focused_agent_target();
+                    self.navigate_agent = self.initial_agent_target();
                     self.navigate_section = SidebarNavSection::Spaces;
                     self.reveal_navigation_workspace = true;
                 }
