@@ -121,6 +121,30 @@ impl ClientShellState {
         })
     }
 
+    pub(super) fn active_section_blocked(&self) -> bool {
+        match self.navigate_section {
+            SidebarNavSection::Spaces => self.workspace_preview_blocked(),
+            SidebarNavSection::Agents => self.agent_preview_blocked(),
+        }
+    }
+
+    pub(super) fn push_active_section_blocked_notice(&mut self) {
+        let _ = match self.navigate_section {
+            SidebarNavSection::Spaces => self.push_endpoint_notice(
+                ClientEndpointNoticeKind::Rejected,
+                "navigate_endpoint_inactive",
+                "Confirm workspace first",
+                "Select an available workspace and press Enter before using workspace or pane actions",
+            ),
+            SidebarNavSection::Agents => self.push_endpoint_notice(
+                ClientEndpointNoticeKind::Rejected,
+                "navigate_agent_endpoint_inactive",
+                "Confirm agent first",
+                "Select an available agent and press Enter before using agent actions",
+            ),
+        };
+    }
+
     pub(super) fn enter_navigate_mode(&mut self, section: SidebarNavSection) {
         self.mobile_switcher_scroll = 0;
         self.reveal_mobile_workspace = false;
