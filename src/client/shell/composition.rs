@@ -40,6 +40,12 @@ impl ClientShellState {
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
+
+        let valid_agent_target = self.mode == ClientShellMode::Navigate
+            && self
+                .navigate_agent
+                .as_ref()
+                .is_some_and(|target| self.navigation_agent_valid(target));
         let pending_workspace_highlight =
             self.pending_workspace_highlight.as_ref().filter(|pending| {
                 self.mode != ClientShellMode::Navigate
@@ -74,6 +80,7 @@ impl ClientShellState {
                 .as_ref()
                 .filter(|_| valid_navigation_target)
                 .or_else(|| pending_workspace_highlight.map(|pending| &pending.target)),
+            selected_agent: self.navigate_agent.as_ref().filter(|_| valid_agent_target),
             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
             dragged_workspace_id: None,
             workspace_drop_indicator_row: None,
@@ -164,6 +171,12 @@ impl ClientShellState {
                 .navigate_workspace_id
                 .as_ref()
                 .is_some_and(|target| self.navigation_target_valid(target));
+
+        let valid_agent_target = self.mode == ClientShellMode::Navigate
+            && self
+                .navigate_agent
+                .as_ref()
+                .is_some_and(|target| self.navigation_agent_valid(target));
         let pending_workspace_highlight =
             self.pending_workspace_highlight.as_ref().filter(|pending| {
                 self.mode != ClientShellMode::Navigate
@@ -230,6 +243,7 @@ impl ClientShellState {
                     .as_ref()
                     .filter(|_| valid_navigation_target)
                     .or_else(|| pending_workspace_highlight.map(|pending| &pending.target)),
+                selected_agent: self.navigate_agent.as_ref().filter(|_| valid_agent_target),
                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
                 dragged_workspace_id,
                 workspace_drop_indicator_row,
@@ -631,6 +645,7 @@ impl ClientShellState {
                 self.navigate_workspace_id
                     .as_ref()
                     .filter(|_| valid_navigation_target),
+                self.navigate_agent.as_ref().filter(|_| valid_agent_target),
                 &mut self.mobile_switcher_scroll,
                 &mut self.reveal_mobile_workspace,
                 &mut self.hits,
