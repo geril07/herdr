@@ -1,5 +1,7 @@
 # herdr
 
+> Personal fork of [herdrdev/herdr](https://github.com/herdrdev/herdr). Read [`FORK.md`](../../FORK.md) first: authority and workflow differ from upstream.
+
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
