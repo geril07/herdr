@@ -60,12 +60,11 @@ pub(crate) fn render_collapsed_sidebar(
             1,
         );
         let selected = selected_workspace_id == Some(workspace.workspace_id.as_str());
-        let selection_background =
-            if workspace.focused && palette.selection_bg == ratatui::style::Color::Reset {
-                palette.active_row_bg
-            } else {
-                palette.selection_bg
-            };
+        let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
+            palette.active_row_bg
+        } else {
+            palette.selection_bg
+        };
         if selected {
             buffer.set_style(rect, Style::default().bg(selection_background));
         } else if workspace.focused {
@@ -322,7 +321,12 @@ pub(crate) fn render_sidebar(
         });
         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
         if selected {
-            buffer.set_style(rect, Style::default().bg(palette.selection_bg));
+            let selection = if palette.selection_bg == ratatui::style::Color::Reset {
+                palette.active_row_bg
+            } else {
+                palette.selection_bg
+            };
+            buffer.set_style(rect, Style::default().bg(selection));
         } else if dragged {
             buffer.set_style(rect, Style::default().bg(palette.surface1));
         } else if workspace.focused {
@@ -750,7 +754,11 @@ pub(in crate::client::shell) fn render_workspace_rows(
     }
 
     let background = if selected {
-        Some(palette.selection_bg)
+        Some(if palette.selection_bg == ratatui::style::Color::Reset {
+            palette.active_row_bg
+        } else {
+            palette.selection_bg
+        })
     } else if dragged {
         Some(palette.surface1)
     } else if endpoint_active && workspace.focused {

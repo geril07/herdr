@@ -1582,7 +1582,7 @@ impl ClientShellState {
             self.reveal_mobile_workspace = self.mobile_layout_active();
         }
         if self.mode == ClientShellMode::Navigate && self.navigate_agent.is_none() {
-            self.navigate_agent = self.focused_agent_target();
+            self.navigate_agent = self.initial_agent_target();
         }
         let pane_exists =
             |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
