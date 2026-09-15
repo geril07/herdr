@@ -101,6 +101,7 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.help, KeybindAction::Help),
         (&keybinds.settings, KeybindAction::Settings),
         (&keybinds.workspace_picker, KeybindAction::WorkspacePicker),
+        (&keybinds.agent_navigation, KeybindAction::AgentNavigation),
         (&keybinds.new_workspace, KeybindAction::NewWorkspace),
         (&keybinds.new_worktree, KeybindAction::NewWorktree),
         (&keybinds.open_worktree, KeybindAction::OpenWorktree),
