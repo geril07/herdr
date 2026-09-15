@@ -90,14 +90,14 @@ pub(crate) fn keybind_help_groups(
                         binding_label(&keybinds.navigate.workspace_up),
                         binding_label(&keybinds.navigate.workspace_down)
                     ),
-                    "workspace list",
+                    "move selection",
                 ),
                 entry(
                     format!(
                         "enter / {}",
                         binding_label(&keybinds.navigate.workspace_open)
                     ),
-                    "open workspace",
+                    "open workspace / agent",
                 ),
                 entry(
                     format!(
@@ -109,8 +109,8 @@ pub(crate) fn keybind_help_groups(
                     ),
                     "move focus",
                 ),
-                entry("tab / shift+tab", "cycle pane"),
-                entry("1..9", "switch workspace"),
+                entry("tab / shift+tab", "switch section"),
+                entry("1..9", "open workspace / agent"),
             ],
         ),
         (
@@ -119,6 +119,10 @@ pub(crate) fn keybind_help_groups(
                 entry(
                     binding_label(&keybinds.workspace_picker),
                     "workspace navigation",
+                ),
+                entry(
+                    binding_label(&keybinds.agent_navigation),
+                    "agent navigation",
                 ),
                 entry(binding_label(&keybinds.agent_picker), "agent picker"),
                 entry(binding_label(&keybinds.goto), "session navigator"),

@@ -54,12 +54,6 @@ impl ClientShellState {
         })
     }
 
-    pub(super) fn workspace_preview_action_blocked(&self) -> bool {
-        self.navigate_workspace_id.as_ref().is_some_and(|target| {
-            target.endpoint_id != self.active_endpoint_id || !self.navigation_target_valid(target)
-        })
-    }
-
     pub(super) fn move_navigate_workspace(&mut self, delta: isize) {
         let mobile = self.mobile_layout_active();
         let surface_available = self.snapshot.is_some() && self.pane_surface.is_some();
@@ -146,7 +140,7 @@ impl ClientShellState {
             outcome,
         ) {
             self.mode = ClientShellMode::Terminal;
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
         }
         outcome.repaint = true;
     }

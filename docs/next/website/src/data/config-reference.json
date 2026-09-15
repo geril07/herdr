@@ -538,8 +538,14 @@
         {
           "key": "keys.agent_picker",
           "type": "keybinding",
-          "default": "\"prefix+a\"",
+          "default": "\"prefix+shift+a\"",
           "description": "Open the agent picker."
+        },
+        {
+          "key": "keys.agent_navigation",
+          "type": "keybinding",
+          "default": "\"prefix+a\"",
+          "description": "Open the agent navigation surface."
         },
         {
           "key": "keys.goto",

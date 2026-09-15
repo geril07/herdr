@@ -128,7 +128,7 @@ impl ClientShellState {
     }
 
     fn prepare_committed_text(&mut self, text: &str, outcome: &mut ClientShellInput) -> bool {
-        if !(self.mode == ClientShellMode::Navigate && self.workspace_preview_action_blocked())
+        if !(self.mode == ClientShellMode::Navigate && self.navigation_preview_action_blocked())
             && self.insert_copy_search_text(text)
         {
             outcome.repaint = true;
@@ -444,7 +444,7 @@ impl ClientShellState {
             || self.popup_input_target().is_some()
             || (self.overlay.is_none()
                 && self.mode == ClientShellMode::Navigate
-                && self.workspace_preview_action_blocked())
+                && self.navigation_preview_action_blocked())
         {
             return false;
         }
@@ -649,7 +649,7 @@ impl ClientShellState {
             || crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
         {
             self.mode = self.copy_or_terminal_mode();
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
             outcome.repaint = true;
             return;
         }
@@ -662,7 +662,10 @@ impl ClientShellState {
             .workspace_up
             .matches_direct_key(key)
         {
-            self.move_navigate_workspace(-1);
+            match self.navigate_section {
+                SidebarNavSection::Spaces => self.move_navigate_workspace(-1),
+                SidebarNavSection::Agents => self.move_navigate_agent(-1),
+            }
             outcome.repaint = true;
             return;
         }
@@ -674,13 +677,16 @@ impl ClientShellState {
             .workspace_down
             .matches_direct_key(key)
         {
-            self.move_navigate_workspace(1);
+            match self.navigate_section {
+                SidebarNavSection::Spaces => self.move_navigate_workspace(1),
+                SidebarNavSection::Agents => self.move_navigate_agent(1),
+            }
             outcome.repaint = true;
             return;
         }
 
         let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-        let opens_workspace = modifiers.is_empty()
+        let opens_selection = modifiers.is_empty()
             && (code == KeyCode::Enter
                 || self
                     .config
@@ -689,11 +695,14 @@ impl ClientShellState {
                     .navigate
                     .workspace_open
                     .matches_direct_key(key));
-        if opens_workspace {
-            self.accept_navigate_workspace(outcome);
+        if opens_selection {
+            match self.navigate_section {
+                SidebarNavSection::Spaces => self.accept_navigate_workspace(outcome),
+                SidebarNavSection::Agents => self.accept_navigate_agent(outcome),
+            }
             return;
         }
-        if self.workspace_preview_action_blocked() {
+        if self.navigation_preview_action_blocked() {
             self.push_endpoint_notice(
                 ClientEndpointNoticeKind::Rejected,
                 "navigate_endpoint_inactive",
@@ -710,18 +719,28 @@ impl ClientShellState {
                 (KeyCode::Char(digit), KeyModifiers::empty()),
             )
         }) {
-            let valid = self.snapshot.as_deref().is_some_and(|snapshot| {
-                self.navigation_workspace_entries(snapshot)
-                    .get(index)
-                    .is_some()
-            });
+            let valid = match self.navigate_section {
+                SidebarNavSection::Spaces => self.snapshot.as_deref().is_some_and(|snapshot| {
+                    self.navigation_workspace_entries(snapshot)
+                        .get(index)
+                        .is_some()
+                }),
+                SidebarNavSection::Agents => super::aggregate_navigation::online_agent_targets(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    self.config.agent_panel_sort,
+                )
+                .get(index)
+                .is_some(),
+            };
             if valid {
                 self.mode = ClientShellMode::Terminal;
-                self.navigate_workspace_id = None;
-                self.record_binding(
-                    KeybindMatch::Action(KeybindAction::SwitchWorkspace(index)),
-                    outcome,
-                );
+                let binding = match self.navigate_section {
+                    SidebarNavSection::Spaces => KeybindAction::SwitchWorkspace(index),
+                    SidebarNavSection::Agents => KeybindAction::FocusAgent(index),
+                };
+                self.clear_navigate_preview();
+                self.record_binding(KeybindMatch::Action(binding), outcome);
                 outcome.repaint = true;
             }
             return;
@@ -729,20 +748,9 @@ impl ClientShellState {
 
         if modifiers.is_empty() {
             match code {
-                KeyCode::Tab => {
-                    self.record_navigate_binding(
-                        KeybindMatch::Action(KeybindAction::CyclePaneNext),
-                        false,
-                        outcome,
-                    );
-                    return;
-                }
-                KeyCode::BackTab => {
-                    self.record_navigate_binding(
-                        KeybindMatch::Action(KeybindAction::CyclePanePrevious),
-                        false,
-                        outcome,
-                    );
+                KeyCode::Tab | KeyCode::BackTab => {
+                    self.switch_navigate_section();
+                    outcome.repaint = true;
                     return;
                 }
                 KeyCode::Left => {
@@ -845,7 +853,7 @@ impl ClientShellState {
             if self.mode == ClientShellMode::Navigate {
                 self.mode = self.copy_or_terminal_mode();
             }
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
         }
         outcome.repaint = true;
     }

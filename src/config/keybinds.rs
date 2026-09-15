@@ -329,6 +329,7 @@ pub struct Keybinds {
     pub close_workspace: ActionKeybinds,
     pub workspace_picker: ActionKeybinds,
     pub agent_picker: ActionKeybinds,
+    pub agent_navigation: ActionKeybinds,
     pub goto: ActionKeybinds,
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
@@ -499,6 +500,7 @@ impl Config {
             close_workspace: empty_action!(),
             workspace_picker: empty_action!(),
             agent_picker: empty_action!(),
+            agent_navigation: empty_action!(),
             goto: empty_action!(),
             detach: empty_action!(),
             reload_config: empty_action!(),
@@ -633,6 +635,7 @@ impl Config {
             apply_action!(keybinds.close_workspace, close_workspace, source);
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
             apply_action!(keybinds.agent_picker, agent_picker, source);
+            apply_action!(keybinds.agent_navigation, agent_navigation, source);
             apply_action!(keybinds.goto, goto, source);
             apply_action!(keybinds.detach, detach, source);
             apply_action!(keybinds.reload_config, reload_config, source);
@@ -1608,10 +1611,22 @@ next_tab = "prefix+n"
     }
 
     #[test]
-    fn agent_picker_defaults_to_prefix_a() {
+    fn agent_picker_defaults_to_prefix_shift_a() {
         let kb = Config::default().keybinds();
         assert_eq!(
             binding_triggers(&kb.agent_picker),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('a'),
+                KeyModifiers::SHIFT
+            ))]
+        );
+    }
+
+    #[test]
+    fn agent_navigation_defaults_to_prefix_a() {
+        let kb = Config::default().keybinds();
+        assert_eq!(
+            binding_triggers(&kb.agent_navigation),
             vec![BindingTrigger::Prefix((
                 KeyCode::Char('a'),
                 KeyModifiers::empty()

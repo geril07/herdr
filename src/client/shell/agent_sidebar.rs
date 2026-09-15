@@ -55,6 +55,7 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    selected_pane_id: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -82,7 +83,8 @@ pub(super) fn render_agent_panel(
         |row| row.rows.len(),
         |buffer, rect, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            let selected = selected_pane_id == Some(row.pane_id.as_str());
+            render_agent_row(buffer, rect, row, config, selected);
         },
     );
 }
@@ -332,9 +334,17 @@ pub(super) fn render_agent_row(
     rect: Rect,
     row: &AgentRow,
     config: &ClientShellConfig,
+    selected: bool,
 ) {
     let palette = &config.palette;
-    let row_style = if row.focused {
+    let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
+        palette.active_row_bg
+    } else {
+        palette.selection_bg
+    };
+    let row_style = if selected {
+        Style::default().bg(selection_background)
+    } else if row.focused {
         Style::default().bg(palette.active_row_bg)
     } else {
         Style::default()
