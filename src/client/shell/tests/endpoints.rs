@@ -3248,3 +3248,98 @@ fn agent_picker_respects_agent_panel_sort_config() {
     // Under Priority sort, Blocked comes before Idle
     assert_eq!(row_names(&state), vec!["blocked-agent", "idle-agent"]);
 }
+
+#[test]
+fn agent_picker_aligns_agent_column_for_uneven_workspace_names() {
+    let mut config = Config::default();
+    config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Spaces;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snap = snapshot();
+    let mut ws_a = snap.workspaces[0].clone();
+    ws_a.workspace_id = "ws_a".into();
+    ws_a.label = "a".into();
+    ws_a.active_tab_id = "tab_a".into();
+    ws_a.focused = true;
+    let mut ws_b = snap.workspaces[0].clone();
+    ws_b.workspace_id = "ws_b".into();
+    ws_b.label = "very-long-workspace-name-indeed".into();
+    ws_b.active_tab_id = "tab_b".into();
+    ws_b.focused = false;
+    snap.workspaces = vec![ws_a, ws_b];
+    let mut tab_a = snap.tabs[0].clone();
+    tab_a.tab_id = "tab_a".into();
+    tab_a.workspace_id = "ws_a".into();
+    let mut tab_b = snap.tabs[0].clone();
+    tab_b.tab_id = "tab_b".into();
+    tab_b.workspace_id = "ws_b".into();
+    tab_b.focused = false;
+    snap.tabs = vec![tab_a, tab_b];
+    let mut pane_a = snap.panes[0].clone();
+    pane_a.pane_id = "pane_1".into();
+    pane_a.workspace_id = "ws_a".into();
+    pane_a.tab_id = "tab_a".into();
+    pane_a.focused = true;
+    let mut pane_b = snap.panes[0].clone();
+    pane_b.pane_id = "pane_2".into();
+    pane_b.workspace_id = "ws_b".into();
+    pane_b.tab_id = "tab_b".into();
+    pane_b.focused = false;
+    snap.panes = vec![pane_a, pane_b];
+    snap.focused_workspace_id = Some("ws_a".into());
+    snap.focused_tab_id = Some("tab_a".into());
+    snap.focused_pane_id = Some("pane_1".into());
+    let mut a0 = agent("alpha", AgentStatus::Idle, 1);
+    a0.pane_id = "pane_1".into();
+    a0.workspace_id = "ws_a".into();
+    a0.tab_id = "tab_a".into();
+    a0.focused = true;
+    let mut a1 = agent("averylongagentname", AgentStatus::Idle, 2);
+    a1.pane_id = "pane_2".into();
+    a1.workspace_id = "ws_b".into();
+    a1.tab_id = "tab_b".into();
+    a1.focused = false;
+    snap.agents = vec![a0, a1];
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_agent_picker_overlay();
+
+    let frame = state.compose(106, 30).expect("agent picker frame");
+    let lines: Vec<String> = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| row.iter().map(|c| c.symbol.as_str()).collect::<String>())
+        .collect();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("very-long-workspace-name-indeed · 1")),
+        "workspace column should retain labels up to its 36-cell limit"
+    );
+    let mut starts = Vec::new();
+    for (rect, _, pane_id) in &state.hits.agent_picker_rows {
+        // Agent column caps at 12: "averylongagentname" renders truncated.
+        let label = if pane_id == "pane_1" {
+            "alpha"
+        } else {
+            "averylongag…"
+        };
+        let start = rect.y as usize * frame.width as usize + rect.x as usize;
+        let cells = &frame.cells[start..start + rect.width as usize];
+        let symbols = label.chars().map(|ch| ch.to_string()).collect::<Vec<_>>();
+        let pos = cells
+            .windows(symbols.len())
+            .position(|window| {
+                window
+                    .iter()
+                    .zip(&symbols)
+                    .all(|(cell, symbol)| cell.symbol == *symbol)
+            })
+            .expect("agent label in row");
+        starts.push(pos);
+    }
+    assert_eq!(starts.len(), 2);
+    assert_eq!(
+        starts[0], starts[1],
+        "agent column should start at the same offset in every row"
+    );
+}
