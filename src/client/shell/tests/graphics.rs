@@ -210,7 +210,6 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "rename",
             input: "name".into(),
-            replace_on_type: false,
             target: ClientRenameTarget::Pane {
                 pane_id: "pane_1".into(),
             },
@@ -223,12 +222,12 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             detail: "confirm".into(),
         }),
         ClientShellOverlay::Help(ClientHelpOverlay {
-            query: String::new(),
+            query: TextEditor::default(),
             search_focused: false,
             scroll: 0,
         }),
         ClientShellOverlay::Navigator(ClientNavigatorOverlay {
-            query: String::new(),
+            query: TextEditor::default(),
             search_focused: false,
             selected: None,
             scroll: 0,
@@ -247,7 +246,6 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             repo_name: "repo".into(),
             branch: "branch".into(),
             checkout_path: "path".into(),
-            replace_on_type: false,
             error: None,
             creating: false,
         }),
@@ -255,7 +253,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             source_workspace_id: "ws_1".into(),
             entries: Vec::new(),
             selected: 0,
-            query: String::new(),
+            query: TextEditor::default(),
             search_focused: false,
             error: None,
             opening: false,

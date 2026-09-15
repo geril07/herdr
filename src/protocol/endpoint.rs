@@ -74,6 +74,9 @@ pub struct EndpointClientHello {
     pub mouse_capture: bool,
     #[serde(default = "default_true")]
     pub surface_active: bool,
+    /// Accept the optional cell-retaining surface encoding on this connection.
+    #[serde(default)]
+    pub surface_reuse: bool,
     #[serde(default)]
     pub snapshot_codecs: Vec<String>,
     #[serde(default)]
@@ -167,6 +170,7 @@ impl EndpointServerWelcome {
             blob_codec: BLOB_CODEC_V1.into(),
             methods,
             capabilities: vec![
+                super::surface_reuse::CAPABILITY.into(),
                 SURFACE_INTEREST_CAPABILITY.into(),
                 PRESENTATION_EFFECTS_FENCE_CAPABILITY.into(),
                 HEALTH_CHECK_CAPABILITY.into(),
@@ -210,6 +214,7 @@ mod tests {
             endpoint_keybindings: false,
             mouse_capture: true,
             surface_active: true,
+            surface_reuse: false,
             snapshot_codecs: vec![SNAPSHOT_CODEC_V1.into()],
             surface_codecs: vec![SURFACE_CODEC_V1.into()],
             input_codecs: vec![INPUT_CODEC_V1.into()],
@@ -356,8 +361,10 @@ mod tests {
     fn legacy_hello_defaults_to_an_active_surface() {
         let mut value = serde_json::to_value(hello()).unwrap();
         value.as_object_mut().unwrap().remove("surface_active");
+        value.as_object_mut().unwrap().remove("surface_reuse");
         let decoded: EndpointClientHello = serde_json::from_value(value).unwrap();
         assert!(decoded.surface_active);
+        assert!(!decoded.surface_reuse);
     }
 
     #[test]
@@ -415,6 +422,7 @@ mod tests {
         assert_eq!(
             welcome.capabilities,
             vec![
+                super::super::surface_reuse::CAPABILITY.to_string(),
                 SURFACE_INTEREST_CAPABILITY.to_string(),
                 PRESENTATION_EFFECTS_FENCE_CAPABILITY.to_string(),
                 HEALTH_CHECK_CAPABILITY.to_string(),
