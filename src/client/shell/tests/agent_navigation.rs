@@ -239,3 +239,82 @@ fn agent_preview_highlights_selected_row_not_focused_row() {
     assert_eq!(buffer[(selected.x, selected.y)].bg, selection);
     assert_eq!(buffer[(focused.x, focused.y)].bg, palette.active_row_bg);
 }
+
+#[test]
+fn agents_navigation_preselects_first_agent_when_focused_pane_is_not_an_agent() {
+    let mut projected = two_agent_snapshot();
+    let mut plain = projected.panes[0].clone();
+    plain.pane_id = "pane_plain".into();
+    plain.focused = true;
+    for pane in &mut projected.panes {
+        pane.focused = false;
+    }
+    projected.panes.push(plain);
+    projected.focused_pane_id = Some("pane_plain".into());
+    for agent in &mut projected.agents {
+        agent.focused = false;
+    }
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.compose(100, 28).unwrap();
+    let first = state
+        .navigation_agent_targets()
+        .into_iter()
+        .next()
+        .expect("agent");
+    enter_agents_navigation(&mut state);
+    assert_eq!(state.navigate_agent.as_ref(), Some(&first));
+    assert_eq!(
+        previewed_pane(&state).as_deref(),
+        Some(first.pane_id.as_str())
+    );
+}
+
+#[test]
+fn tab_recovers_from_stale_workspace_preview_and_digits_use_active_section() {
+    let mut state = agent_nav_state();
+    state.compose(100, 28).unwrap();
+    enter_navigation(&mut state);
+    // Poison the hidden workspace preview; agent preview stays valid.
+    state.navigate_workspace_id =
+        state.navigation_target(&ClientEndpointId::Local, "missing-workspace");
+    assert!(state.workspace_preview_blocked());
+    assert!(!state.agent_preview_blocked());
+    // Tab still switches sections as a recovery path.
+    preview_key(&mut state, b"\t");
+    assert_eq!(state.navigate_section, SidebarNavSection::Agents);
+    // Digit in Agents uses only the agent preview, so it focuses the agent.
+    let two = state.handle_input_bytes(b"2");
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    let [ClientShellAction::Endpoint { request, .. }] = &two.actions[..] else {
+        panic!("digit should focus the indexed agent");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_2"
+    ));
+}
+
+#[test]
+fn stale_agent_digit_shows_agent_notice_not_workspace_notice() {
+    let mut state = agent_nav_state();
+    state.compose(100, 28).unwrap();
+    enter_agents_navigation(&mut state);
+    state.navigate_agent = state
+        .navigation_target(&ClientEndpointId::Local, "ws_1")
+        .map(|workspace| {
+            super::super::agent_navigation::AgentNavigationTarget::for_test(
+                workspace.endpoint_id,
+                "missing-pane".into(),
+                "boot-1".into(),
+                None,
+            )
+        });
+    assert!(state.agent_preview_blocked());
+    let outcome = state.handle_input_bytes(b"1");
+    assert!(outcome.actions.is_empty() && outcome.requests.is_empty());
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    let notice = state.visible_endpoint_notice.as_ref().expect("notice");
+    assert_eq!(notice.key.code, "navigate_agent_endpoint_inactive");
+}

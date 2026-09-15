@@ -13,6 +13,21 @@ impl AgentNavigationTarget {
     pub(super) fn matches(&self, endpoint_id: &ClientEndpointId, pane_id: &str) -> bool {
         &self.endpoint_id == endpoint_id && self.pane_id == pane_id
     }
+
+    #[cfg(test)]
+    pub(super) fn for_test(
+        endpoint_id: ClientEndpointId,
+        pane_id: String,
+        boot_id: String,
+        generation: Option<u64>,
+    ) -> Self {
+        Self {
+            endpoint_id,
+            pane_id,
+            boot_id,
+            generation,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -91,11 +106,43 @@ impl ClientShellState {
     }
 
     pub(super) fn navigation_preview_action_blocked(&self) -> bool {
+        self.workspace_preview_blocked() || self.agent_preview_blocked()
+    }
+
+    pub(super) fn workspace_preview_blocked(&self) -> bool {
         self.navigate_workspace_id.as_ref().is_some_and(|target| {
             target.endpoint_id != self.active_endpoint_id || !self.navigation_target_valid(target)
-        }) || self.navigate_agent.as_ref().is_some_and(|target| {
+        })
+    }
+
+    pub(super) fn agent_preview_blocked(&self) -> bool {
+        self.navigate_agent.as_ref().is_some_and(|target| {
             target.endpoint_id != self.active_endpoint_id || !self.navigation_agent_valid(target)
         })
+    }
+
+    pub(super) fn active_section_blocked(&self) -> bool {
+        match self.navigate_section {
+            SidebarNavSection::Spaces => self.workspace_preview_blocked(),
+            SidebarNavSection::Agents => self.agent_preview_blocked(),
+        }
+    }
+
+    pub(super) fn push_active_section_blocked_notice(&mut self) {
+        let _ = match self.navigate_section {
+            SidebarNavSection::Spaces => self.push_endpoint_notice(
+                ClientEndpointNoticeKind::Rejected,
+                "navigate_endpoint_inactive",
+                "Confirm workspace first",
+                "Select an available workspace and press Enter before using workspace or pane actions",
+            ),
+            SidebarNavSection::Agents => self.push_endpoint_notice(
+                ClientEndpointNoticeKind::Rejected,
+                "navigate_agent_endpoint_inactive",
+                "Confirm agent first",
+                "Select an available agent and press Enter before using agent actions",
+            ),
+        };
     }
 
     pub(super) fn enter_navigate_mode(&mut self, section: SidebarNavSection) {

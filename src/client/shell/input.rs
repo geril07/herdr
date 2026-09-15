@@ -710,23 +710,26 @@ impl ClientShellState {
             }
             return;
         }
-        if self.navigation_preview_action_blocked() {
-            self.push_endpoint_notice(
-                ClientEndpointNoticeKind::Rejected,
-                "navigate_endpoint_inactive",
-                "Confirm workspace first",
-                "Select an available workspace and press Enter before using workspace or pane actions",
-            );
+        // Tab is always allowed as a recovery path between sections,
+        // even when one preview went stale.
+        if modifiers.is_empty() && matches!(code, KeyCode::Tab | KeyCode::BackTab) {
+            self.switch_navigate_section();
             outcome.repaint = true;
             return;
         }
-
         if let Some(index) = ('1'..='9').position(|digit| {
             crate::config::terminal_key_matches_combo(
                 key,
                 (KeyCode::Char(digit), KeyModifiers::empty()),
             )
         }) {
+            // Digits check only the active section so a stale hidden preview
+            // does not block the visible list. None stays unblocked (empty list).
+            if self.active_section_blocked() {
+                self.push_active_section_blocked_notice();
+                outcome.repaint = true;
+                return;
+            }
             let valid = match self.navigate_section {
                 SidebarNavSection::Spaces => self.snapshot.as_deref().is_some_and(|snapshot| {
                     self.navigation_workspace_entries(snapshot)
@@ -753,14 +756,19 @@ impl ClientShellState {
             }
             return;
         }
+        if self.navigation_preview_action_blocked() {
+            self.push_endpoint_notice(
+                ClientEndpointNoticeKind::Rejected,
+                "navigate_endpoint_inactive",
+                "Confirm workspace first",
+                "Select an available workspace and press Enter before using workspace or pane actions",
+            );
+            outcome.repaint = true;
+            return;
+        }
 
         if modifiers.is_empty() {
             match code {
-                KeyCode::Tab | KeyCode::BackTab => {
-                    self.switch_navigate_section();
-                    outcome.repaint = true;
-                    return;
-                }
                 KeyCode::Left => {
                     self.record_navigate_binding(
                         KeybindMatch::Action(KeybindAction::FocusPaneLeft),
