@@ -2,6 +2,15 @@
 
 Terminal based agent runtime for coding agents.
 
+## Fork scope
+
+This checkout is the `geril07/herdr` fork. Its canonical repository is the
+fork, its base branch is `fork/master`, and its maintainer is `geril07`.
+Differences from upstream (authority, default PR/issue targets, sync) are listed
+in [`FORK.md`](./FORK.md). Universal project rules below still apply; where
+this file names the upstream canonical repository, its maintainers, or its
+release process, read `FORK.md` instead for work here.
+
 ## Scope and Audience
 
 These instructions are layered.
