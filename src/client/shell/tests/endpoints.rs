@@ -565,6 +565,75 @@ fn saved_machine_preserves_endpoint_scoped_worktree_collapses() {
 }
 
 #[test]
+fn expanded_machine_sidebar_reveals_newly_focused_workspace() {
+    let (mut state, remote_id) = state_with_remote();
+    let mut initial = snapshot();
+    let template = initial.workspaces[0].clone();
+    initial.workspaces = (1..=12)
+        .map(|number| ClientShellWorkspace {
+            workspace_id: format!("ws_{number}"),
+            number,
+            label: format!("space-{number}"),
+            focused: number == 1,
+            ..template.clone()
+        })
+        .collect();
+    // Reuse workspace IDs across machines so revealing must be endpoint-scoped.
+    let mut remote = initial.clone();
+    remote.boot_id = "remote-boot".into();
+    remote.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_13".into(),
+        number: 13,
+        focused: false,
+        ..template.clone()
+    });
+    state.set_endpoint_snapshot(&remote_id, Box::new(remote));
+    state.set_snapshot(Box::new(initial));
+    state.compose(106, 20).expect("full machines sidebar");
+    assert!(state.hits.workspace_max_scroll > 0);
+
+    let mut update = state.snapshot.as_deref().expect("snapshot").clone();
+    update.revision = 2;
+    update.workspaces.push(ClientShellWorkspace {
+        workspace_id: "ws_13".into(),
+        number: 13,
+        label: "new-space".into(),
+        ..template
+    });
+    update.focused_workspace_id = Some("ws_13".into());
+    for workspace in &mut update.workspaces {
+        workspace.focused = workspace.workspace_id == "ws_13";
+    }
+    state.set_snapshot(Box::new(update));
+    let mut updated_surface = surface();
+    updated_surface.projection_revision = 2;
+    state.set_pane_surface(updated_surface);
+    state.compose(106, 2).expect("zero-height workspace body");
+    assert!(state.reveal_focused_workspace);
+    state.compose(106, 20).expect("new workspace revealed");
+    assert!(state
+        .hits
+        .workspaces
+        .iter()
+        .any(|hit| { hit.endpoint_id == ClientEndpointId::Local && hit.workspace_id == "ws_13" }));
+
+    state.workspace_scroll = 0;
+    state.compose(106, 20).expect("manual scroll");
+    assert_eq!(state.workspace_scroll, 0);
+    assert!(!state
+        .hits
+        .workspaces
+        .iter()
+        .any(|hit| { hit.endpoint_id == ClientEndpointId::Local && hit.workspace_id == "ws_13" }));
+    let unchanged = state.snapshot.as_deref().expect("snapshot").clone();
+    state.set_snapshot(Box::new(unchanged));
+    state
+        .compose(106, 20)
+        .expect("unchanged focus preserves scroll");
+    assert_eq!(state.workspace_scroll, 0);
+}
+
+#[test]
 fn expanded_machine_sidebar_applies_space_row_gap_within_each_machine() {
     let (mut state, remote_id) = state_with_remote();
     state.config.spaces.row_gap = 1;
@@ -1527,6 +1596,55 @@ fn new_connection_generation_accepts_a_lower_same_boot_projection_revision() {
 }
 
 #[test]
+fn reconnect_same_endpoint_accepts_new_generation_surface_revision() {
+    for previous_revision in [9, 1] {
+        let (mut state, endpoint_id) = state_with_remote();
+        let mut previous = snapshot();
+        previous.boot_id = "shared-server-boot".into();
+        previous.revision = previous_revision;
+        state.cache_endpoint_snapshot_inactive_for_generation(&endpoint_id, 4, Box::new(previous));
+        assert!(state.activate_endpoint_projection(&endpoint_id));
+        let mut previous_surface = surface();
+        previous_surface.boot_id = "shared-server-boot".into();
+        previous_surface.projection_revision = previous_revision;
+        previous_surface.surface_revision = 9;
+        state.set_pane_surface(previous_surface.clone());
+        previous_surface.projection_revision += 1;
+        state.set_pane_surface(previous_surface);
+        assert!(state.pending_pane_surface.is_some());
+        state.agent_scroll = 7;
+
+        state.mark_endpoint_disconnected(&endpoint_id);
+        let mut reconnected = snapshot();
+        reconnected.boot_id = "shared-server-boot".into();
+        reconnected.revision = 1;
+        state.cache_endpoint_snapshot_inactive_for_generation(
+            &endpoint_id,
+            5,
+            Box::new(reconnected),
+        );
+        assert_eq!(state.snapshot.as_ref().unwrap().revision, previous_revision);
+        assert_eq!(state.pane_surface.as_ref().unwrap().surface_revision, 9);
+
+        state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+        assert!(state.activate_endpoint_projection(&endpoint_id));
+        assert!(state.compose(106, 20).is_none());
+        let mut reconnected_surface = surface();
+        reconnected_surface.boot_id = "shared-server-boot".into();
+        reconnected_surface.projection_revision = 1;
+        reconnected_surface.surface_revision = 1;
+        state.set_pane_surface(reconnected_surface);
+
+        assert_eq!(state.snapshot.as_ref().unwrap().revision, 1);
+        assert_eq!(state.pane_surface.as_ref().unwrap().projection_revision, 1);
+        assert_eq!(state.pane_surface.as_ref().unwrap().surface_revision, 1);
+        assert!(state.pending_pane_surface.is_none());
+        assert_eq!(state.agent_scroll, 7);
+        assert!(state.compose(106, 20).is_some());
+    }
+}
+
+#[test]
 fn reconnect_snapshot_waits_for_coherent_activation_before_replacing_projection() {
     let (mut state, endpoint_id) = state_with_remote();
     assert!(state.activate_endpoint_projection(&endpoint_id));
@@ -1983,7 +2101,7 @@ fn navigator_search_ctrl_w_deletes_word_back() {
         else {
             panic!("expected navigator");
         };
-        navigator.query.clone()
+        navigator.query.as_str().to_owned()
     };
     let press = |state: &mut ClientShellState, code, modifiers| {
         state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
@@ -2489,7 +2607,7 @@ fn navigator_clear_filters_requires_uppercase_f_and_retains_selection() {
         else {
             panic!("expected navigator");
         };
-        navigator.query = "pane 1".to_owned();
+        navigator.query = "pane 1".into();
         navigator.filter = Some(ClientNavigatorFilter::Idle);
         navigator.selected = None;
     };
@@ -2513,7 +2631,7 @@ fn navigator_clear_filters_requires_uppercase_f_and_retains_selection() {
         else {
             panic!("expected navigator");
         };
-        assert_eq!(navigator.query, "pane 1");
+        assert_eq!(navigator.query.as_str(), "pane 1");
         assert_eq!(navigator.filter, Some(ClientNavigatorFilter::Idle));
         assert_eq!(navigator.selected, None);
     }
@@ -2526,7 +2644,7 @@ fn navigator_clear_filters_requires_uppercase_f_and_retains_selection() {
         else {
             panic!("expected navigator");
         };
-        assert_eq!(navigator.query, "");
+        assert_eq!(navigator.query.as_str(), "");
         assert_eq!(navigator.filter, None);
         assert_eq!(navigator.selected, expected_current_selection);
     }
@@ -2539,7 +2657,7 @@ fn navigator_clear_filters_requires_uppercase_f_and_retains_selection() {
         else {
             panic!("expected navigator");
         };
-        assert_eq!(navigator.query, "");
+        assert_eq!(navigator.query.as_str(), "");
         assert_eq!(navigator.filter, None);
         assert_eq!(navigator.selected, expected_current_selection);
     }
@@ -2552,7 +2670,7 @@ fn navigator_clear_filters_requires_uppercase_f_and_retains_selection() {
         else {
             panic!("expected navigator");
         };
-        assert_eq!(navigator.query, "");
+        assert_eq!(navigator.query.as_str(), "");
         assert_eq!(navigator.filter, None);
         assert_eq!(navigator.selected, expected_current_selection);
     }
