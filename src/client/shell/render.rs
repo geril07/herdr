@@ -108,9 +108,9 @@ pub(super) fn render_mode_bar(
                     (" NAVIGATE ".to_owned(), mode_style),
                     (" esc back  ".to_owned(), base),
                     ("↑/↓".to_owned(), key),
-                    (" workspace  ".to_owned(), base),
+                    (" move  ".to_owned(), base),
                     ("tab".to_owned(), key),
-                    (" pane  ".to_owned(), base),
+                    (" section  ".to_owned(), base),
                     (prefix_rhs(&keybinds.keybinds.help), key),
                     (" keybinds".to_owned(), base),
                 ]);
@@ -231,6 +231,7 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) sidebar_section_split: f32,
     pub(super) tab_drag_insert_index: Option<usize>,
     pub(super) selected_workspace_id: Option<&'a WorkspaceNavigationTarget>,
+    pub(super) selected_agent: Option<&'a AgentNavigationTarget>,
     pub(super) reveal_navigation_workspace: &'a mut bool,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
@@ -282,6 +283,7 @@ pub(super) fn render_shell(
                 state
                     .selected_workspace_id
                     .map(|target| target.workspace_id.as_str()),
+                state.selected_agent.map(|target| target.pane_id.as_str()),
                 &mut hits,
             );
         } else {

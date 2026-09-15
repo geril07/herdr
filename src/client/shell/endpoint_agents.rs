@@ -7,12 +7,22 @@ pub(super) fn render_collapsed(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
+    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
     let rows = agent_rows(endpoints, active_endpoint_id, config);
     for (index, row) in rows.into_iter().take(area.height as usize).enumerate() {
         let rect = Rect::new(area.x, area.y + index as u16, area.width, 1);
-        if row.agent.focused {
+        let selected = selected_agent
+            .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
+        if selected {
+            let background = if config.palette.selection_bg == ratatui::style::Color::Reset {
+                config.palette.active_row_bg
+            } else {
+                config.palette.selection_bg
+            };
+            buffer.set_style(rect, Style::default().bg(background));
+        } else if row.agent.focused {
             buffer.set_style(rect, Style::default().bg(config.palette.active_row_bg));
         }
         let initial = row.machine_label.chars().next().unwrap_or('?');
@@ -50,6 +60,7 @@ pub(super) fn render_expanded(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
     if !super::agent_sidebar::render_agent_panel_header(
@@ -72,7 +83,9 @@ pub(super) fn render_expanded(
         hits,
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
+            let selected = selected_agent
+                .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
+            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config, selected);
             if row.stale {
                 buffer.set_style(
                     rect,

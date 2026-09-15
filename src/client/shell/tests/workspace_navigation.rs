@@ -278,7 +278,7 @@ fn foreign_workspace_preview_blocks_paste_into_hidden_copy_search() {
     });
     enter_navigation(&mut state);
     preview_key(&mut state, b"\x1b[B");
-    assert!(state.workspace_preview_action_blocked());
+    assert!(state.navigation_preview_action_blocked());
     assert!(!state.modal_paste_target_active());
     let key = crate::input::TerminalKey::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
     assert!(!state.handle_modal_paste_shortcut_with(

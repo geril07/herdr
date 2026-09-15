@@ -2766,7 +2766,7 @@ fn agent_picker_keybind_opens_overlay() {
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
 
-    // Send default prefix (ctrl+b) then 'a'
+    // Send default prefix (ctrl+b) then 'shift+a'
     state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
         KeyCode::Char('b'),
         KeyModifiers::CONTROL,
@@ -2775,7 +2775,7 @@ fn agent_picker_keybind_opens_overlay() {
 
     state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
         KeyCode::Char('a'),
-        KeyModifiers::empty(),
+        KeyModifiers::SHIFT,
     ))]);
     assert!(matches!(
         state.overlay,

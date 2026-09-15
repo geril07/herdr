@@ -962,6 +962,8 @@ pub(crate) struct ClientShellState {
     pub(super) collapsed_endpoints: HashSet<ClientEndpointId>,
     pub(super) mode: ClientShellMode,
     pub(super) navigate_workspace_id: Option<WorkspaceNavigationTarget>,
+    pub(super) navigate_agent: Option<AgentNavigationTarget>,
+    pub(super) navigate_section: SidebarNavSection,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
@@ -1124,6 +1126,8 @@ impl ClientShellState {
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,
             navigate_workspace_id: None,
+            navigate_agent: None,
+            navigate_section: SidebarNavSection::Spaces,
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,
@@ -1188,7 +1192,7 @@ impl ClientShellState {
             .is_some()
         {
             self.mode = self.copy_or_terminal_mode();
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
         } else {
             self.mode = ClientShellMode::Navigate;
         }
@@ -1314,7 +1318,7 @@ impl ClientShellState {
         self.visible_endpoint_notice = None;
         self.endpoint_error = None;
         self.endpoint_error_deadline = None;
-        self.navigate_workspace_id = None;
+        self.clear_navigate_preview();
         self.overlay = self
             .config
             .startup_onboarding
@@ -1409,11 +1413,19 @@ impl ClientShellState {
         }
         if boot_changed {
             // A reboot must not turn Enter on a stale preview into focus on a reused ID.
-            let preview = (self.mode == ClientShellMode::Navigate)
-                .then(|| self.navigate_workspace_id.take())
-                .flatten();
+            let preview = (self.mode == ClientShellMode::Navigate).then(|| {
+                (
+                    self.navigate_workspace_id.take(),
+                    self.navigate_agent.take(),
+                    self.navigate_section,
+                )
+            });
             self.reset_endpoint_projection();
-            self.navigate_workspace_id = preview;
+            if let Some((workspace, agent, section)) = preview {
+                self.navigate_workspace_id = workspace;
+                self.navigate_agent = agent;
+                self.navigate_section = section;
+            }
         } else if let Some(previous) = self
             .snapshot
             .as_deref()
@@ -1549,6 +1561,9 @@ impl ClientShellState {
                 .as_deref()
                 .and_then(|id| self.navigation_target(&self.active_endpoint_id, id));
             self.reveal_mobile_workspace = self.mobile_layout_active();
+        }
+        if self.mode == ClientShellMode::Navigate && self.navigate_agent.is_none() {
+            self.navigate_agent = self.focused_agent_target();
         }
         let pane_exists =
             |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
@@ -1704,7 +1719,7 @@ impl ClientShellState {
                     .remove_target(&ClientInputTarget::Popup(terminal_id.clone()));
             }
             self.mode = ClientShellMode::Terminal;
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
             if !matches!(
                 self.overlay.as_ref(),
                 Some(ClientShellOverlay::Onboarding | ClientShellOverlay::ProductAnnouncement(_))
