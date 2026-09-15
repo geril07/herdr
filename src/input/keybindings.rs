@@ -28,6 +28,8 @@ pub(crate) enum KeybindAction {
     SwitchTab(usize),
     FocusAgent(usize),
     WorkspacePicker,
+    /// Enter navigate mode on the sidebar Agents section.
+    AgentNavigation,
     PreviousWorkspace,
     NextWorkspace,
     PreviousAgent,

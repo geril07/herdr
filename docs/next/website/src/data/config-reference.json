@@ -530,6 +530,12 @@
           "description": "Close the selected workspace."
         },
         {
+          "key": "keys.agent_navigation",
+          "type": "keybinding",
+          "default": "\"prefix+a\"",
+          "description": "Enter navigate mode on the sidebar Agents section. Default: \"prefix+a\"."
+        },
+        {
           "key": "keys.workspace_picker",
           "type": "keybinding",
           "default": "\"prefix+w\"",
