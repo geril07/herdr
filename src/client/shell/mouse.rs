@@ -669,13 +669,13 @@ impl ClientShellState {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
         if self.mode == ClientShellMode::Navigate
-            && self.workspace_preview_action_blocked()
+            && self.navigation_preview_action_blocked()
             && self.overlay.is_none()
             && !self.mobile_layout_active()
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
         {
             self.mode = self.copy_or_terminal_mode();
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
             outcome.repaint = true;
         }
         if mouse.kind == MouseEventKind::Down(MouseButton::Left)

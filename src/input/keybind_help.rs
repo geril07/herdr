@@ -102,7 +102,7 @@ pub(crate) fn keybind_help_groups(
                     ),
                     "move focus",
                 ),
-                entry("tab / shift+tab", "cycle pane"),
+                entry("tab / shift+tab", "switch sidebar section"),
                 entry("enter", "open workspace"),
                 entry("1..9", "switch workspace"),
             ],
