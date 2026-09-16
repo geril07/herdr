@@ -197,10 +197,6 @@ fn status_icon(
     }
 }
 
-fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {
-    status_icon(status, crate::config::StatusIndicatorStyle::Dots)
-}
-
 fn status_priority(status: crate::api::schema::AgentStatus) -> u8 {
     use crate::api::schema::AgentStatus;
     match status {

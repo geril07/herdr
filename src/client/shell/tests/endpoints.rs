@@ -3343,3 +3343,94 @@ fn agent_picker_aligns_agent_column_for_uneven_workspace_names() {
         "agent column should start at the same offset in every row"
     );
 }
+
+#[test]
+fn navigator_aligns_status_icons_for_current_and_other_panes() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.workspaces[0].label = "main".into();
+    let mut a0 = agent("alpha", AgentStatus::Working, 1);
+    a0.pane_id = "pane_1".into();
+    a0.focused = true;
+    let mut pane2 = snap.panes[0].clone();
+    pane2.pane_id = "pane_2".into();
+    pane2.focused = false;
+    let mut a1 = agent("beta", AgentStatus::Idle, 2);
+    a1.pane_id = "pane_2".into();
+    a1.focused = false;
+    snap.panes = vec![snap.panes[0].clone(), pane2];
+    snap.agents = vec![a0, a1];
+    snap.focused_pane_id = Some("pane_1".into());
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let frame = state.compose(106, 30).expect("navigator frame");
+    let mut status_x = Vec::new();
+    for (rect, target) in &state.hits.navigator_rows {
+        if !matches!(target, ClientNavigatorTarget::Pane { .. }) {
+            continue;
+        }
+        let y = rect.y as usize;
+        let row = &frame.cells[y * frame.width as usize..(y + 1) * frame.width as usize];
+        let x = row
+            .iter()
+            .position(|cell| cell.symbol == "●" || cell.symbol == "○" || cell.symbol == "·")
+            .expect("status icon in pane row");
+        status_x.push(x);
+    }
+    assert_eq!(status_x.len(), 2);
+    assert_eq!(
+        status_x[0], status_x[1],
+        "status icons should start at the same offset whether or not the row is current"
+    );
+}
+
+#[test]
+fn agent_picker_respects_status_indicator_style() {
+    use crate::config::StatusIndicatorStyle;
+    let mut config = Config::default();
+    config.ui.status_indicators = StatusIndicatorStyle::Symbols;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut snap = snapshot();
+    let mut a0 = agent("blocked-agent", AgentStatus::Blocked, 4);
+    a0.pane_id = "pane_1".into();
+    let mut pane2 = snap.panes[0].clone();
+    pane2.pane_id = "pane_2".into();
+    pane2.focused = false;
+    let mut a1 = agent("working-agent", AgentStatus::Working, 3);
+    a1.pane_id = "pane_2".into();
+    a1.focused = false;
+    let mut pane3 = snap.panes[0].clone();
+    pane3.pane_id = "pane_3".into();
+    pane3.focused = false;
+    let mut a2 = agent("idle-agent", AgentStatus::Idle, 2);
+    a2.pane_id = "pane_3".into();
+    a2.focused = false;
+    snap.panes = vec![snap.panes[0].clone(), pane2, pane3];
+    snap.agents = vec![a0, a1, a2];
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_agent_picker_overlay();
+
+    let frame = state.compose(106, 30).expect("agent picker frame");
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| row.iter().map(|c| c.symbol.as_str()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Under the dots style these would all render as ●/○; symbols use ×/◐.
+    assert!(
+        text.contains('×'),
+        "blocked agent should use the symbols-style icon"
+    );
+    assert!(
+        text.contains('◐'),
+        "working agent should use the symbols-style icon"
+    );
+    assert!(
+        !text.contains('●'),
+        "no dots-style icon should remain under the symbols style"
+    );
+}

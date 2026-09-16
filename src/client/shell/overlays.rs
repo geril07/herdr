@@ -67,15 +67,21 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
         ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
-        ClientShellOverlay::Navigator(v) => {
-            render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
-        }
+        ClientShellOverlay::Navigator(v) => render_navigator_overlay(
+            b,
+            v,
+            endpoints,
+            active_endpoint_id,
+            config.status_indicators,
+            p,
+        ),
         ClientShellOverlay::AgentPicker(v) => render_agent_picker_overlay(
             b,
             v,
             endpoints,
             active_endpoint_id,
             config.agent_panel_sort,
+            config.status_indicators,
             p,
         ),
         ClientShellOverlay::Settings(v) => {
@@ -721,6 +727,7 @@ fn render_navigator_overlay(
     n: &ClientNavigatorOverlay,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
+    indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 84, (b.area.height * 75 / 100).clamp(16, 26))?.intersection(b.area);
@@ -862,8 +869,13 @@ fn render_navigator_overlay(
                 prefix
             }
         };
-        let current = if r.current { "◆ " } else { "" };
-        let status = r.status.map(status_dot).unwrap_or_default();
+        // The two-cell marker slot keeps status icons and labels aligned
+        // whether or not a row is the current one.
+        let current = if r.current { "◆ " } else { "  " };
+        let status = r
+            .status
+            .map(|s| status_icon(s, indicators))
+            .unwrap_or_default();
         let status_separator = if status.is_empty() { "" } else { " " };
         let label = format!(" {tree} {current}{status}{status_separator}{}", r.label);
         put_text(b, rect.x, rect.y, rect.width, &label, st);
@@ -878,8 +890,8 @@ fn render_navigator_overlay(
                 b,
                 rect.x.saturating_add(display_width(&prefix)),
                 rect.y,
-                display_width(status_dot(status)),
-                status_dot(status),
+                display_width(status_icon(status, indicators)),
+                status_icon(status, indicators),
                 status_style,
             );
         }
@@ -965,6 +977,7 @@ fn render_agent_picker_overlay(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 76, (b.area.height * 65 / 100).clamp(14, 22))?;
@@ -1083,7 +1096,7 @@ fn render_agent_picker_overlay(
 
         // The two-cell marker slot keeps every following table column aligned.
         let current = if r.current { "◆ " } else { "  " };
-        let status = status_dot(r.status);
+        let status = status_icon(r.status, indicators);
         let ws_shown = crate::ui::truncate_end(&r.workspace_tab, ws_max as usize);
         let ws_padded = format!(
             "{ws_shown}{}",
