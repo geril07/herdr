@@ -867,7 +867,7 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
             .map(|(rect, _)| {
                 frame.cells[rect.y as usize * frame.width as usize + rect.x as usize + 1..]
                     .iter()
-                    .take(6)
+                    .take(10)
                     .map(|cell| cell.symbol.as_str())
                     .collect::<String>()
             })
@@ -876,17 +876,17 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
     assert_eq!(
         prefixes(&mut state, 30),
         [
-            "▾ clie",
-            "├── ed",
-            "│  ├──",
-            "│  └──",
-            "├── no",
-            "│  └──",
-            "└── lo",
-            "   └──",
-            "▾ seco",
-            "└── la",
-            "   └──"
+            "▾   client",
+            "├──   edit",
+            "│  ├──   ·",
+            "│  └──   ·",
+            "├──   note",
+            "│  └──   ·",
+            "└──   logs",
+            "   └──   ·",
+            "▾   second",
+            "└──   last",
+            "   └──   ·"
         ]
     );
 
@@ -901,7 +901,7 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
     });
     assert_eq!(
         prefixes(&mut state, 12),
-        ["│  ├──", "│  └──", "├── no", "│  └──"]
+        ["│  ├──   ·", "│  └──   ·", "├──   note", "│  └──   ·"]
     );
 
     // Excluded siblings must not leave dangling continuation lines.
@@ -910,13 +910,16 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
     };
     navigator.query = "shell".into();
     navigator.scroll = 0;
-    assert_eq!(prefixes(&mut state, 30), ["▾ clie", "└── ed", "   └──"]);
+    assert_eq!(
+        prefixes(&mut state, 30),
+        ["▾   client", "└──   edit", "   └──   ·"]
+    );
     let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
         panic!("expected navigator");
     };
     navigator.query.clear();
     navigator.expanded_workspaces.clear();
-    assert_eq!(prefixes(&mut state, 30), ["▸ clie", "▸ seco"]);
+    assert_eq!(prefixes(&mut state, 30), ["▸   client", "▸   second"]);
 }
 
 #[test]
