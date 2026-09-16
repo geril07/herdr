@@ -168,7 +168,26 @@ fn sort_aggregate_rows(
                 std::cmp::Reverse(row.recency),
             )
         });
+    } else {
+        rows.sort_by_key(|row| {
+            grouped_workspace_position(row.endpoint.snapshot, &row.agent.workspace_id)
+        });
     }
+}
+
+/// Grouped workspace position (parent, children, standalone) matching the
+/// spaces panel. Fully expanded grouping so collapsed groups keep agent order.
+fn grouped_workspace_position(snapshot: &ClientShellSnapshot, workspace_id: &str) -> usize {
+    let empty = HashSet::new();
+    super::render::workspace_entries(snapshot, &empty)
+        .into_iter()
+        .position(|entry| {
+            snapshot
+                .workspaces
+                .get(entry.index)
+                .is_some_and(|workspace| workspace.workspace_id == workspace_id)
+        })
+        .unwrap_or(usize::MAX)
 }
 
 struct ClientAgentViewEntry<'a> {
@@ -231,11 +250,8 @@ impl crate::agent_view_eval::AgentViewEntry for ClientAgentViewEntry<'_> {
     }
 
     fn workspace_order(&self) -> Option<u64> {
-        self.snapshot
-            .workspaces
-            .iter()
-            .position(|workspace| workspace.workspace_id == self.agent.workspace_id)
-            .map(|index| index as u64)
+        let position = grouped_workspace_position(self.snapshot, &self.agent.workspace_id);
+        (position != usize::MAX).then_some(position as u64)
     }
 
     fn tab_order(&self) -> Option<u64> {

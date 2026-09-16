@@ -42,10 +42,35 @@ pub(super) fn ordered_agent_pane_ids(
                 std::cmp::Reverse(agent.state_change_seq),
             )
         });
+    } else {
+        let order = grouped_workspace_order(snapshot);
+        agents.sort_by_key(|agent| {
+            order
+                .get(&agent.workspace_id)
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
     }
     agents
         .into_iter()
         .map(|agent| agent.pane_id.clone())
+        .collect()
+}
+
+/// Grouped workspace position (parent, children, standalone) used to keep the
+/// agents panel in the same order as the spaces panel. Uses the fully expanded
+/// grouping so agents of collapsed groups stay ordered instead of hidden.
+fn grouped_workspace_order(snapshot: &ClientShellSnapshot) -> HashMap<String, usize> {
+    let empty = std::collections::HashSet::new();
+    super::render::workspace_entries(snapshot, &empty)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(position, entry)| {
+            snapshot
+                .workspaces
+                .get(entry.index)
+                .map(|workspace| (workspace.workspace_id.clone(), position))
+        })
         .collect()
 }
 

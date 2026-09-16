@@ -334,25 +334,63 @@ fn mouse_clicks_cancel_remote_workspace_navigation() {
 }
 
 #[test]
-fn single_machine_compact_navigation_includes_visible_collapsed_group_children() {
+fn single_machine_compact_navigation_hides_collapsed_group_children() {
     let (mut state, _) = navigation_state(grouped_workspaces());
     state.set_endpoint_catalog(&[]);
     state.toggle_collapsed_group(&ClientEndpointId::Local, "repo".into());
     state.sidebar_collapsed = true;
     state.compose(100, 28).unwrap();
-    workspace_rect(&state, &ClientEndpointId::Local, "ws_3");
+    workspace_rect(&state, &ClientEndpointId::Local, "ws_1");
+    workspace_rect(&state, &ClientEndpointId::Local, "ws_2");
+    assert!(
+        state
+            .hits
+            .workspaces
+            .iter()
+            .all(|hit| hit.workspace_id != "ws_3"),
+        "collapsed child must stay hidden in collapsed sidebar"
+    );
     enter_navigation(&mut state);
-    for id in ["ws_2", "ws_3"] {
-        preview_key(&mut state, b"\x1b[B");
-        assert_selected(&state, &ClientEndpointId::Local, id);
+    preview_key(&mut state, b"\x1b[B");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
+    preview_key(&mut state, b"\x1b[B");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_1");
+}
+
+#[test]
+fn single_machine_compact_navigation_shows_focused_collapsed_child() {
+    let mut grouped = grouped_workspaces();
+    for workspace in &mut grouped.workspaces {
+        workspace.focused = workspace.workspace_id == "ws_3";
     }
+    grouped.focused_workspace_id = Some("ws_3".into());
+    let (mut state, _) = navigation_state(grouped);
+    state.set_endpoint_catalog(&[]);
+    state.toggle_collapsed_group(&ClientEndpointId::Local, "repo".into());
+    state.sidebar_collapsed = true;
+    state.compose(100, 28).unwrap();
+    workspace_rect(&state, &ClientEndpointId::Local, "ws_3");
+    assert!(
+        state
+            .hits
+            .workspaces
+            .iter()
+            .find(|hit| hit.workspace_id == "ws_3")
+            .is_some_and(|hit| hit.indented),
+        "focused collapsed child stays visible and marked indented"
+    );
+    enter_navigation(&mut state);
+    preview_key(&mut state, b"\x1b[B");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
+    preview_key(&mut state, b"\x1b[B");
+    assert_selected(&state, &ClientEndpointId::Local, "ws_1");
 }
 
 #[test]
 fn workspace_navigation_respects_each_machines_visible_worktree_groups() {
     for (cols, compact, unavailable, show_child) in [
         (100, false, false, false),
-        (100, true, false, true),
+        (100, true, false, false),
         (44, false, false, true),
         (44, true, true, false),
     ] {
@@ -364,11 +402,7 @@ fn workspace_navigation_respects_each_machines_visible_worktree_groups() {
         }
         state.compose(cols, 28).unwrap();
         enter_navigation(&mut state);
-        let local = if compact && !unavailable {
-            ["ws_2", "ws_3"]
-        } else {
-            ["ws_3", "ws_2"]
-        };
+        let local = ["ws_3", "ws_2"];
         let remote_ids: &[&str] = if !show_child {
             &["ws_1", "ws_2"]
         } else if compact {
