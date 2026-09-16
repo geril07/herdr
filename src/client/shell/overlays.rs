@@ -40,6 +40,7 @@ pub(crate) fn render_client_overlay(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     k: &LiveKeybindConfig,
+    status_indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
     if !matches!(
@@ -67,7 +68,7 @@ pub(crate) fn render_client_overlay(
         }
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
         ClientShellOverlay::Navigator(v) => {
-            render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
+            render_navigator_overlay(b, v, endpoints, active_endpoint_id, status_indicators, p)
         }
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
@@ -704,6 +705,7 @@ fn render_navigator_overlay(
     n: &ClientNavigatorOverlay,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
+    indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let a = b.area;
@@ -872,8 +874,13 @@ fn render_navigator_overlay(
         let padding = u16::from(r.depth.saturating_sub(u8::from(is_pane))) * 2 + 1;
         let connector_x = rect.x + padding;
         let indent = format!("{:width$}{connector}", "", width = usize::from(padding));
-        let current = if r.current { "◆ " } else { "" };
-        let status = r.status.map(status_dot).unwrap_or_default();
+        // The two-cell marker slot keeps status icons and labels aligned
+        // whether or not a row is the current one.
+        let current = if r.current { "◆ " } else { "  " };
+        let status = r
+            .status
+            .map(|s| status_icon(s, indicators))
+            .unwrap_or_default();
         let status_separator = if status.is_empty() { "" } else { " " };
         let label = format!("{indent}{current}{status}{status_separator}{}", r.label);
         let st = if r.status.is_none() {
@@ -926,8 +933,8 @@ fn render_navigator_overlay(
                 b,
                 rect.x.saturating_add(display_width(&prefix)),
                 rect.y,
-                display_width(status_dot(status)),
-                status_dot(status),
+                display_width(status_icon(status, indicators)),
+                status_icon(status, indicators),
                 status_style,
             );
             let meta_style = if r.stale || ix == selected {
