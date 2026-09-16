@@ -1034,10 +1034,18 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     };
     let visible = visible_rows(&mut state, 30);
     assert_eq!(visible.len(), 7);
-    for (row, prefix) in visible
-        .iter()
-        .zip([" client", " ├─ ", " ├─ ", " ├─ ", " └─ ", " second", " └─ "])
-    {
+    for (row, prefix) in visible.iter().zip([
+        // Workspace rows carry the two-cell current-marker slot, so their
+        // indent is three cells wide. Pane rows place the slot after the
+        // tree connector, so their prefix is unchanged.
+        "   client",
+        " ├─ ",
+        " ├─ ",
+        " ├─ ",
+        " └─ ",
+        "   second",
+        " └─ ",
+    ]) {
         assert!(
             row.starts_with(prefix),
             "{row:?} should start with {prefix:?}"

@@ -2666,9 +2666,16 @@ fn navigator_pane_keys(state: &ClientShellState) -> Vec<String> {
 }
 
 fn press_navigator_key(state: &mut ClientShellState, code: KeyCode) -> ClientShellInput {
+    press_navigator_mod(state, code, KeyModifiers::empty())
+}
+
+fn press_navigator_mod(
+    state: &mut ClientShellState,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) -> ClientShellInput {
     state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
-        code,
-        KeyModifiers::empty(),
+        code, modifiers,
     ))])
 }
 
@@ -2975,5 +2982,176 @@ fn navigator_default_selection_targets_focused_workspace_or_pane() {
     assert!(
         !ws_2_row.current,
         "the workspace row must yield the marker to its focused pane"
+    );
+}
+
+#[test]
+fn navigator_aligns_status_icons_for_current_and_other_panes() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    snap.workspaces[0].label = "main".into();
+    let mut a0 = agent("alpha", AgentStatus::Working, 1);
+    a0.pane_id = "pane_1".into();
+    a0.focused = true;
+    let mut pane2 = snap.panes[0].clone();
+    pane2.pane_id = "pane_2".into();
+    pane2.focused = false;
+    let mut a1 = agent("beta", AgentStatus::Idle, 2);
+    a1.pane_id = "pane_2".into();
+    a1.focused = false;
+    snap.panes = vec![snap.panes[0].clone(), pane2];
+    snap.agents = vec![a0, a1];
+    snap.focused_pane_id = Some("pane_1".into());
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+
+    let frame = state.compose(106, 30).expect("navigator frame");
+    let mut status_x = Vec::new();
+    for (rect, target) in &state.hits.navigator_rows {
+        if !matches!(target, ClientNavigatorTarget::Pane { .. }) {
+            continue;
+        }
+        let y = rect.y as usize;
+        let row = &frame.cells[y * frame.width as usize..(y + 1) * frame.width as usize];
+        let x = row
+            .iter()
+            .position(|cell| cell.symbol == "●" || cell.symbol == "○" || cell.symbol == "·")
+            .expect("status icon in pane row");
+        status_x.push(x);
+    }
+    assert_eq!(status_x.len(), 2);
+    assert_eq!(
+        status_x[0], status_x[1],
+        "status icons should start at the same offset whether or not the row is current"
+    );
+}
+
+#[test]
+fn navigator_uses_configured_status_indicator_style() {
+    use crate::config::StatusIndicatorStyle;
+    for (style, blocked, working, forbidden) in [
+        (StatusIndicatorStyle::Dots, "●", "●", "×"),
+        (StatusIndicatorStyle::Symbols, "×", "◐", "●"),
+    ] {
+        let mut config = Config::default();
+        config.ui.status_indicators = style;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        let mut snap = snapshot();
+        let mut a0 = agent("blocked-agent", AgentStatus::Blocked, 4);
+        a0.pane_id = "pane_1".into();
+        let mut pane2 = snap.panes[0].clone();
+        pane2.pane_id = "pane_2".into();
+        pane2.focused = false;
+        let mut a1 = agent("working-agent", AgentStatus::Working, 3);
+        a1.pane_id = "pane_2".into();
+        a1.focused = false;
+        snap.panes = vec![snap.panes[0].clone(), pane2];
+        snap.agents = vec![a0, a1];
+        state.set_snapshot(Box::new(snap));
+        state.set_pane_surface(surface());
+        state.open_navigator_overlay();
+
+        let frame = state.compose(106, 30).expect("navigator frame");
+        let text = frame
+            .cells
+            .chunks(frame.width as usize)
+            .map(|row| row.iter().map(|c| c.symbol.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains(blocked),
+            "{style:?} should render {blocked:?}"
+        );
+        assert!(
+            text.contains(working),
+            "{style:?} should render {working:?}"
+        );
+        assert!(
+            !text.contains(forbidden),
+            "{style:?} must not render {forbidden:?}"
+        );
+    }
+}
+
+#[test]
+fn navigator_ctrl_n_and_p_move_the_selection_in_browse_mode() {
+    let mut state = navigator_multi_workspace_state(true);
+    state.open_navigator_overlay();
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: "ws_1".into(),
+        });
+    }
+    press_navigator_mod(&mut state, KeyCode::Char('n'), KeyModifiers::CONTROL);
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should stay open");
+    };
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Pane {
+            endpoint_id: state.active_endpoint_id.clone(),
+            pane_id: "pane_1".into(),
+        }),
+        "ctrl+n steps forward to the next row"
+    );
+    press_navigator_mod(&mut state, KeyCode::Char('p'), KeyModifiers::CONTROL);
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should stay open");
+    };
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: "ws_1".into(),
+        }),
+        "ctrl+p steps back"
+    );
+}
+
+#[test]
+fn navigator_f_clears_filters_and_keeps_the_current_selection() {
+    let mut state = navigator_multi_workspace_state(true);
+    state.open_navigator_overlay();
+    // Apply a status filter, which hides the idle pane rows.
+    press_navigator_key(&mut state, KeyCode::Char('b'));
+    assert!(
+        navigator_pane_keys(&state).is_empty(),
+        "idle rows are filtered out"
+    );
+    press_navigator_key(&mut state, KeyCode::Char('F'));
+    assert_eq!(
+        navigator_pane_keys(&state),
+        vec!["pane_1", "pane_2"],
+        "F clears the status filter"
+    );
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should stay open");
+    };
+    assert!(
+        navigator.query.as_str().is_empty(),
+        "F clears the search query too"
+    );
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Pane {
+            endpoint_id: state.active_endpoint_id.clone(),
+            pane_id: "pane_1".into(),
+        }),
+        "F puts the selection back on the current row, not the top"
+    );
+}
+
+#[test]
+fn navigator_plain_f_does_not_clear_filters() {
+    let mut state = navigator_multi_workspace_state(true);
+    state.open_navigator_overlay();
+    press_navigator_key(&mut state, KeyCode::Char('b'));
+    assert!(navigator_pane_keys(&state).is_empty());
+    press_navigator_key(&mut state, KeyCode::Char('f'));
+    assert!(
+        navigator_pane_keys(&state).is_empty(),
+        "plain f must leave the filter in place"
     );
 }

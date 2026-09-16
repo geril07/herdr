@@ -799,6 +799,16 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
+            if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_navigator_selection(1);
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
+                self.move_navigator_selection(-1);
+                outcome.repaint = true;
+                return;
+            }
             if code == KeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) {
                 self.move_navigator_selection(8);
                 outcome.repaint = true;
@@ -820,6 +830,30 @@ impl ClientShellState {
                     navigator.query.clear();
                     navigator.filter = Some(filter);
                     navigator.selected = None;
+                }
+                outcome.repaint = true;
+                return;
+            }
+            // Terminals report an upper-case letter either as Char('F') or as
+            // Char('f') with Shift, so accept both but keep plain `f` unbound.
+            let is_clear_filters = (code == KeyCode::Char('F')
+                || (code == KeyCode::Char('f') && modifiers.contains(KeyModifiers::SHIFT)))
+                && modifiers.difference(KeyModifiers::SHIFT).is_empty();
+            if is_clear_filters {
+                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                    navigator.query.clear();
+                    navigator.filter = None;
+                    // Clearing the filter can reveal the current row again, so
+                    // put the selection back on it rather than on the top row.
+                    let rows = render::client_navigator_rows(
+                        &self.endpoints,
+                        &self.active_endpoint_id,
+                        navigator,
+                    );
+                    navigator.selected = rows
+                        .iter()
+                        .find(|row| row.current)
+                        .map(|row| row.target.clone());
                 }
                 outcome.repaint = true;
                 return;
