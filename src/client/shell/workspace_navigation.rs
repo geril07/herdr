@@ -66,26 +66,13 @@ impl ClientShellState {
             let Some(snapshot) = endpoint.snapshot.as_deref() else {
                 continue;
             };
-            let entries = if self.sidebar_collapsed && !mobile && surface_available {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .enumerate()
-                    .map(|(index, _)| WorkspaceEntry {
-                        index,
-                        indented: false,
-                        last_child: false,
-                    })
-                    .collect()
+            let collapsed_groups = if mobile && surface_available {
+                &empty_collapsed_groups
             } else {
-                let collapsed_groups = if mobile && surface_available {
-                    &empty_collapsed_groups
-                } else {
-                    self.collapsed_groups_for_endpoint(&endpoint.endpoint_id)
-                        .unwrap_or(&empty_collapsed_groups)
-                };
-                render::workspace_entries(snapshot, collapsed_groups)
+                self.collapsed_groups_for_endpoint(&endpoint.endpoint_id)
+                    .unwrap_or(&empty_collapsed_groups)
             };
+            let entries = render::workspace_entries(snapshot, collapsed_groups);
             for entry in entries {
                 targets.push(WorkspaceNavigationTarget {
                     endpoint_id: endpoint.endpoint_id.clone(),

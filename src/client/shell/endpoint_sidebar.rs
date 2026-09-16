@@ -24,30 +24,53 @@ pub(super) fn render_collapsed(
     super::render::render_sidebar_background(buffer, area, palette, on_right);
     let (workspace_area, divider_y, detail_area) =
         super::sidebar::collapsed_sidebar_sections(area, on_right);
-    let mut total_rows = 0usize;
-    let mut selected_row = None;
-    let reveal = std::mem::take(state.reveal_navigation_workspace);
-    for endpoint in state.endpoints {
-        total_rows += 1;
+    let empty_collapsed_groups = HashSet::new();
+    enum CollapsedRow {
+        Endpoint(usize),
+        Workspace {
+            endpoint: usize,
+            entry: WorkspaceEntry,
+        },
+    }
+    let mut rows = Vec::new();
+    for (endpoint_index, endpoint) in state.endpoints.iter().enumerate() {
+        rows.push(CollapsedRow::Endpoint(endpoint_index));
         if state.collapsed_endpoints.contains(&endpoint.endpoint_id) {
             continue;
         }
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
-            if reveal {
-                if let Some(target) = state
-                    .selected_workspace_id
-                    .filter(|target| target.endpoint_id == endpoint.endpoint_id)
-                {
-                    selected_row = snapshot
-                        .workspaces
-                        .iter()
-                        .position(|workspace| workspace.workspace_id == target.workspace_id)
-                        .map(|index| total_rows + index);
-                }
-            }
-            total_rows += snapshot.workspaces.len();
+            let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
+                .unwrap_or(&empty_collapsed_groups);
+            rows.extend(
+                super::sidebar::workspace_entries(snapshot, collapsed_groups)
+                    .into_iter()
+                    .map(|entry| CollapsedRow::Workspace {
+                        endpoint: endpoint_index,
+                        entry,
+                    }),
+            );
         }
     }
+    let mut selected_row = None;
+    let reveal = std::mem::take(state.reveal_navigation_workspace);
+    if reveal {
+        selected_row = rows.iter().position(|row| match row {
+            CollapsedRow::Workspace { endpoint, entry } => {
+                let endpoint = &state.endpoints[*endpoint];
+                endpoint
+                    .snapshot
+                    .as_deref()
+                    .and_then(|snapshot| snapshot.workspaces.get(entry.index))
+                    .is_some_and(|workspace| {
+                        state.selected_workspace_id.is_some_and(|target| {
+                            target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
+                        })
+                    })
+            }
+            CollapsedRow::Endpoint(_) => false,
+        });
+    }
+    let total_rows = rows.len();
     let height = usize::from(workspace_area.height);
     let max_scroll = total_rows.saturating_sub(height);
     *state.workspace_scroll = (*state.workspace_scroll).min(max_scroll);
@@ -61,121 +84,139 @@ pub(super) fn render_collapsed(
     hits.workspace_max_scroll = max_scroll;
     let mut skip = *state.workspace_scroll;
     let mut y = workspace_area.y;
-    for (index, endpoint) in state.endpoints.iter().enumerate() {
+    for row in rows.iter() {
         if y >= workspace_area.bottom() {
             break;
         }
-        let rect = Rect::new(workspace_area.x, y, workspace_area.width, 1);
-        let active = &endpoint.endpoint_id == state.active_endpoint_id;
-        let collapsed = state.collapsed_endpoints.contains(&endpoint.endpoint_id);
-        if skip > 0 {
-            skip -= 1;
-        } else {
-            if active && collapsed {
-                buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-            }
-            let label = if endpoint.endpoint_id.is_local() {
-                "L".to_owned()
-            } else {
-                (index + 1).to_string()
-            };
-            let marker = if collapsed { "▸" } else { "▾" };
-            put_text(
-                buffer,
-                rect.x,
-                rect.y,
-                rect.width.saturating_sub(1),
-                &format!("{marker}{label}"),
-                Style::default().fg(if endpoint.status == ClientEndpointStatus::Online {
-                    palette.text
+        match row {
+            CollapsedRow::Endpoint(index) => {
+                let endpoint = &state.endpoints[*index];
+                let rect = Rect::new(workspace_area.x, y, workspace_area.width, 1);
+                let active = &endpoint.endpoint_id == state.active_endpoint_id;
+                let collapsed = state.collapsed_endpoints.contains(&endpoint.endpoint_id);
+                if skip > 0 {
+                    skip -= 1;
                 } else {
-                    palette.overlay0
-                }),
-            );
-            if !endpoint.endpoint_id.is_local() {
-                let (glyph, _, color) = endpoint_status_presentation(endpoint.status, palette);
-                put_right_text(buffer, rect, rect.y, glyph, Style::default().fg(color));
-            }
-            hits.machines.push(MachineHit {
-                rect,
-                collapse_toggle: Rect::new(rect.x, rect.y, u16::from(rect.width > 1), 1),
-                endpoint_id: endpoint.endpoint_id.clone(),
-            });
-            y = y.saturating_add(1);
-        }
-        if collapsed {
-            continue;
-        }
-        let Some(snapshot) = endpoint.snapshot.as_deref() else {
-            continue;
-        };
-        for workspace in &snapshot.workspaces {
-            if skip > 0 {
-                skip -= 1;
-                continue;
-            }
-            if y >= workspace_area.bottom() {
-                break;
-            }
-            let rect = Rect::new(workspace_area.x, y, workspace_area.width, 1);
-            let focused = active && workspace.focused;
-            let selected = state.selected_workspace_id.is_some_and(|target| {
-                target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
-            });
-            let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
-                palette.active_row_bg
-            } else {
-                palette.selection_bg
-            };
-            if selected {
-                buffer.set_style(rect, Style::default().bg(selection_background));
-            } else if focused {
-                buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-            }
-            let stale = endpoint.status != ClientEndpointStatus::Online;
-            let number = format!(" {}", workspace.number);
-            let number_width = super::render::display_width(&number).min(rect.width);
-            let dim = if stale {
-                Modifier::DIM
-            } else {
-                Modifier::empty()
-            };
-            put_text(
-                buffer,
-                rect.x,
-                rect.y,
-                number_width,
-                &number,
-                Style::default()
-                    .fg(if focused && !stale {
-                        palette.text
+                    if active && collapsed {
+                        buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
+                    }
+                    let label = if endpoint.endpoint_id.is_local() {
+                        "L".to_owned()
                     } else {
-                        palette.overlay0
-                    })
-                    .add_modifier(dim),
-            );
-            put_text(
-                buffer,
-                rect.x.saturating_add(number_width),
-                rect.y,
-                rect.width.saturating_sub(number_width),
-                status_icon(workspace.agent_status, config.status_indicators),
-                Style::default()
-                    .fg(if stale {
-                        palette.overlay0
-                    } else {
-                        status_color(workspace.agent_status, palette)
-                    })
-                    .add_modifier(dim),
-            );
-            hits.workspaces.push(WorkspaceHit {
-                rect,
-                endpoint_id: endpoint.endpoint_id.clone(),
-                workspace_id: workspace.workspace_id.clone(),
-                indented: false,
-                group_toggle: None,
-            });
-            y = y.saturating_add(1);
+                        (*index + 1).to_string()
+                    };
+                    let marker = if collapsed { "▸" } else { "▾" };
+                    put_text(
+                        buffer,
+                        rect.x,
+                        rect.y,
+                        rect.width.saturating_sub(1),
+                        &format!("{marker}{label}"),
+                        Style::default().fg(if endpoint.status == ClientEndpointStatus::Online {
+                            palette.text
+                        } else {
+                            palette.overlay0
+                        }),
+                    );
+                    if !endpoint.endpoint_id.is_local() {
+                        let (glyph, _, color) =
+                            endpoint_status_presentation(endpoint.status, palette);
+                        put_right_text(buffer, rect, rect.y, glyph, Style::default().fg(color));
+                    }
+                    hits.machines.push(MachineHit {
+                        rect,
+                        collapse_toggle: Rect::new(rect.x, rect.y, u16::from(rect.width > 1), 1),
+                        endpoint_id: endpoint.endpoint_id.clone(),
+                    });
+                    y = y.saturating_add(1);
+                }
+            }
+            CollapsedRow::Workspace { endpoint, entry } => {
+                let endpoint = &state.endpoints[*endpoint];
+                let Some(snapshot) = endpoint.snapshot.as_deref() else {
+                    continue;
+                };
+                let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+                    continue;
+                };
+                let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
+                    .unwrap_or(&empty_collapsed_groups);
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
+                if y >= workspace_area.bottom() {
+                    break;
+                }
+                let active = &endpoint.endpoint_id == state.active_endpoint_id;
+                let rect = Rect::new(workspace_area.x, y, workspace_area.width, 1);
+                let focused = active && workspace.focused;
+                let selected = state.selected_workspace_id.is_some_and(|target| {
+                    target.matches(&endpoint.endpoint_id, &workspace.workspace_id)
+                });
+                let status = super::sidebar::displayed_workspace_status(
+                    snapshot,
+                    workspace,
+                    collapsed_groups,
+                );
+                let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
+                    palette.active_row_bg
+                } else {
+                    palette.selection_bg
+                };
+                if selected {
+                    buffer.set_style(rect, Style::default().bg(selection_background));
+                } else if focused {
+                    buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
+                }
+                let stale = endpoint.status != ClientEndpointStatus::Online;
+                let number = format!(" {}", workspace.number);
+                let number_width = super::render::display_width(&number).min(rect.width);
+                let mut dim = if stale {
+                    Modifier::DIM
+                } else {
+                    Modifier::empty()
+                };
+                if entry.indented {
+                    dim.insert(Modifier::DIM);
+                }
+                put_text(
+                    buffer,
+                    rect.x,
+                    rect.y,
+                    number_width,
+                    &number,
+                    Style::default()
+                        .fg(if focused && !stale {
+                            palette.text
+                        } else {
+                            palette.overlay0
+                        })
+                        .add_modifier(dim),
+                );
+                put_text(
+                    buffer,
+                    rect.x.saturating_add(number_width),
+                    rect.y,
+                    rect.width.saturating_sub(number_width),
+                    status_icon(status, config.status_indicators),
+                    Style::default()
+                        .fg(if stale {
+                            palette.overlay0
+                        } else {
+                            status_color(status, palette)
+                        })
+                        .add_modifier(dim),
+                );
+                hits.workspaces.push(WorkspaceHit {
+                    rect,
+                    endpoint_id: endpoint.endpoint_id.clone(),
+                    workspace_id: workspace.workspace_id.clone(),
+                    indented: entry.indented,
+                    group_toggle: None,
+                });
+                y = y.saturating_add(1);
+            }
         }
     }
     if let Some(divider_y) = divider_y {
