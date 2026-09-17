@@ -247,7 +247,8 @@ impl ClientShellState {
             }
             ClientContextMenuAction::Close => {
                 if self.config.confirm_close {
-                    self.open_confirm_close_overlay(workspace_id);
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
                 } else {
                     self.push_endpoint_method(
                         crate::api::schema::Method::WorkspaceClose(
@@ -359,7 +360,8 @@ impl ClientShellState {
             }
             ClientContextMenuAction::Close => {
                 if self.config.confirm_tab_close {
-                    self.open_confirm_tab_close_overlay(tab_id);
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.open_confirm_tab_close_overlay(&endpoint_id, tab_id);
                 } else {
                     self.push_endpoint_method(Method::TabClose(TabTarget { tab_id }), outcome);
                 }
@@ -462,7 +464,8 @@ impl ClientShellState {
             ),
             ClientContextMenuAction::ClosePane => {
                 if self.config.confirm_pane_close {
-                    self.open_confirm_pane_close_overlay(pane_id);
+                    let endpoint_id = self.active_endpoint_id.clone();
+                    self.open_confirm_pane_close_overlay(&endpoint_id, pane_id);
                 } else {
                     self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
                 }

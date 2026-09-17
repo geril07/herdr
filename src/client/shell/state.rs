@@ -643,9 +643,18 @@ pub(super) struct ClientContextMenuItem {
 
 #[derive(Debug)]
 pub(super) enum ClientConfirmCloseTarget {
-    Workspace { workspace_id: String },
-    Pane { pane_id: String },
-    Tab { tab_id: String },
+    Workspace {
+        endpoint_id: ClientEndpointId,
+        workspace_id: String,
+    },
+    Pane {
+        endpoint_id: ClientEndpointId,
+        pane_id: String,
+    },
+    Tab {
+        endpoint_id: ClientEndpointId,
+        tab_id: String,
+    },
 }
 
 #[derive(Debug)]
@@ -758,6 +767,7 @@ pub(super) struct PendingEndpointRequest {
     pub(super) boot_id: String,
     pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
+    pub(super) confirmation_endpoint_id: Option<ClientEndpointId>,
     pub(super) kind: PendingEndpointKind,
 }
 

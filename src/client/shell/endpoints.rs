@@ -447,10 +447,14 @@ impl ClientShellState {
         self.set_endpoint_methods_for(&endpoint_id, methods);
     }
 
-    pub(super) fn supports_endpoint_method(&self, method: &crate::api::schema::Method) -> bool {
+    pub(super) fn supports_endpoint_method_for(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        method: &crate::api::schema::Method,
+    ) -> bool {
         self.endpoints
             .iter()
-            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
             .and_then(|endpoint| endpoint.methods.as_ref())
             .is_none_or(|methods| methods.contains(crate::api::api_method_name(method)))
     }

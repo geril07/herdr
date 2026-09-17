@@ -580,7 +580,7 @@ fn pane_close_keybind_confirms_before_closing_when_enabled() {
     assert!(matches!(
         state.overlay.as_ref(),
         Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-            target: ClientConfirmCloseTarget::Pane { pane_id },
+            target: ClientConfirmCloseTarget::Pane { pane_id, .. },
             ..
         })) if pane_id == "pane_1"
     ));
@@ -752,7 +752,7 @@ fn pane_context_menu_close_follows_pane_confirmation_setting() {
             assert!(matches!(
                 state.overlay.as_ref(),
                 Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-                    target: ClientConfirmCloseTarget::Pane { pane_id },
+                    target: ClientConfirmCloseTarget::Pane { pane_id, .. },
                     ..
                 })) if pane_id == "pane_1"
             ));
@@ -792,7 +792,7 @@ fn tab_close_keybind_confirms_before_closing_when_enabled() {
     assert!(matches!(
         state.overlay.as_ref(),
         Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-            target: ClientConfirmCloseTarget::Tab { tab_id },
+            target: ClientConfirmCloseTarget::Tab { tab_id, .. },
             ..
         })) if tab_id == "tab_1"
     ));
@@ -886,7 +886,7 @@ fn tab_context_menu_close_follows_tab_confirmation_setting() {
             assert!(matches!(
                 state.overlay.as_ref(),
                 Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-                    target: ClientConfirmCloseTarget::Tab { tab_id },
+                    target: ClientConfirmCloseTarget::Tab { tab_id, .. },
                     ..
                 })) if tab_id == "tab_1"
             ));
