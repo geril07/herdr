@@ -361,6 +361,7 @@ pub struct Keybinds {
     pub close_workspace: ActionKeybinds,
     pub workspace_picker: ActionKeybinds,
     pub goto: ActionKeybinds,
+    pub confirm_accept: ActionKeybinds,
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
@@ -518,6 +519,12 @@ impl Config {
         navigate_registry.reserve_prefix_keys("keys.prefix", prefix_source);
         reserve_navigate_runtime_keys(&mut navigate_registry);
         let prefix = prefix_keys;
+        // Confirmation dialogs are modal like navigate mode: the alias key is only
+        // active while the dialog is open, so plain keys such as "y" are safe here.
+        // A separate registry keeps the reserved navigate keys from rejecting them
+        // and from conflict-reporting against the navigate_* fields.
+        let mut dialog_registry = BindingRegistry::new(prefix.clone(), prefix_source);
+        dialog_registry.reserve_prefix_keys("keys.prefix", prefix_source);
 
         macro_rules! empty_action {
             () => {
@@ -544,6 +551,7 @@ impl Config {
             close_workspace: empty_action!(),
             workspace_picker: empty_action!(),
             goto: empty_action!(),
+            confirm_accept: empty_action!(),
             detach: empty_action!(),
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
@@ -648,6 +656,20 @@ impl Config {
             };
         }
 
+        macro_rules! apply_dialog {
+            ($target:expr, $field:ident, $source:expr) => {
+                if field_source!($field) == $source {
+                    $target = parse_navigate_bindings(
+                        concat!("keys.", stringify!($field)),
+                        &self.keys.$field,
+                        &mut dialog_registry,
+                        &mut diagnostics,
+                        $source,
+                    );
+                }
+            };
+        }
+
         for source in [BindingSource::User, BindingSource::Default] {
             apply_navigate!(
                 keybinds.navigate.workspace_up,
@@ -673,6 +695,7 @@ impl Config {
             apply_action!(keybinds.close_workspace, close_workspace, source);
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
             apply_action!(keybinds.goto, goto, source);
+            apply_dialog!(keybinds.confirm_accept, confirm_accept, source);
             apply_action!(keybinds.detach, detach, source);
             apply_action!(keybinds.reload_config, reload_config, source);
             apply_action!(
@@ -2006,6 +2029,68 @@ navigate_pane_down = "ctrl+j"
             diag.contains("kept keys.navigate_workspace_up")
                 && diag.contains("disabled keys.navigate_workspace_down")
         }));
+    }
+
+    #[test]
+    fn confirm_accept_is_unset_by_default_and_allows_plain_keys() {
+        let config: Config = toml::from_str("[keys]\n").unwrap();
+        assert!(config.keybinds().confirm_accept.bindings.is_empty());
+
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+confirm_accept = ["y", "Y"]
+"#,
+        )
+        .unwrap();
+        let keybinds = config.keybinds();
+        assert_eq!(keybinds.confirm_accept.bindings.len(), 2);
+        assert!(keybinds
+            .confirm_accept
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty())));
+        assert!(keybinds
+            .confirm_accept
+            .matches_direct_key(&TerminalKey::new(KeyCode::Char('Y'), KeyModifiers::empty())));
+    }
+
+    #[test]
+    fn confirm_accept_rejects_prefix_and_esc() {
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+confirm_accept = ["prefix+y", "esc"]
+"#,
+        )
+        .unwrap();
+        let diagnostics = config.collect_diagnostics();
+        assert!(config.keybinds().confirm_accept.bindings.is_empty());
+        assert!(diagnostics
+            .iter()
+            .any(|diag| diag.contains("keys.confirm_accept")));
+    }
+
+    #[test]
+    fn confirm_accept_does_not_conflict_report_against_navigate_keys() {
+        // The dialog registry is separate from the navigate registry, so a plain
+        // letter that navigate also uses must not be reported as a conflict.
+        let config: Config = toml::from_str(
+            r#"
+[keys]
+confirm_accept = "j"
+
+[keys.navigate]
+pane_down = "j"
+"#,
+        )
+        .unwrap();
+        let diagnostics = config.collect_diagnostics();
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diag| diag.contains("keys.confirm_accept")),
+            "unexpected confirm_accept diagnostic: {diagnostics:?}"
+        );
+        assert_eq!(config.keybinds().confirm_accept.bindings.len(), 1);
     }
 
     #[test]
