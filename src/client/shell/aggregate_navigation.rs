@@ -309,13 +309,21 @@ pub(super) fn navigator_rows(
     let federated = endpoints.len() > 1;
     let depth_offset = u8::from(federated);
     let mut rows = Vec::new();
+    // Grouped workspace order (parent, children, standalone) matching the
+    // spaces panel. Fully expanded grouping so the order stays stable
+    // regardless of sidebar collapse state.
+    let empty_collapsed_groups = HashSet::new();
 
     for endpoint in endpoints {
         let stale = endpoint.status != ClientEndpointStatus::Online;
         let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
         let mut endpoint_rows = Vec::new();
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
-            for workspace in &snapshot.workspaces {
+            let ordered = super::render::workspace_entries(snapshot, &empty_collapsed_groups);
+            for entry in ordered {
+                let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+                    continue;
+                };
                 let workspace_meta = workspace.branch.clone().unwrap_or_default();
                 let key = (endpoint.endpoint_id.clone(), workspace.workspace_id.clone());
                 let expanded = navigator.expanded_workspaces.contains(&key);
