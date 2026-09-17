@@ -1053,6 +1053,14 @@ fn pane_confirm_mouse_accept_keeps_the_navigator_open() {
 #[test]
 fn stale_pane_confirm_accept_still_returns_to_the_navigator() {
     let mut state = state_with_navigator_then_confirm(open_pane_confirm);
+    // Before accepting, the navigator is parked inside the dialog.
+    let selected_before = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+            return_to_navigator: Some(navigator),
+            ..
+        })) => selected_target_of(&state, navigator),
+        _ => panic!("confirm dialog with a saved navigator should be open"),
+    };
     state
         .snapshot
         .as_mut()
@@ -1065,6 +1073,25 @@ fn stale_pane_confirm_accept_still_returns_to_the_navigator() {
         matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
         "the error path must not lose the navigator"
     );
+    // Nothing was closed, so the highlight must not move. Retargeting here would
+    // silently skip a row for no reason.
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should be open");
+    };
+    assert_eq!(
+        selected_target_of(&state, navigator),
+        selected_before,
+        "a rejected confirm must leave the navigator selection alone"
+    );
+}
+
+fn selected_target_of(
+    state: &ClientShellState,
+    navigator: &ClientNavigatorOverlay,
+) -> Option<ClientNavigatorTarget> {
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    aggregate_navigation::selected_navigator_target(&rows, navigator)
 }
 
 #[test]

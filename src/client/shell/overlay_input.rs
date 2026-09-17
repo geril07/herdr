@@ -360,6 +360,88 @@ impl ClientShellState {
         }
     }
 
+    pub(super) fn close_navigator_selection(&mut self, outcome: &mut ClientShellInput) {
+        // Machine rows are group headers and cannot be closed.
+        let Some(target) = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                super::aggregate_navigation::selected_navigator_target(&rows, navigator)
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        match target {
+            ClientNavigatorTarget::Machine { .. } => return,
+            ClientNavigatorTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+            } => {
+                if self.config.confirm_close {
+                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
+                } else {
+                    self.push_endpoint_method_to(
+                        &endpoint_id,
+                        crate::api::schema::Method::WorkspaceClose(
+                            crate::api::schema::WorkspaceCloseParams {
+                                workspace_id,
+                                close_group: true,
+                            },
+                        ),
+                        outcome,
+                    );
+                    self.retarget_navigator_selection_after_close();
+                }
+            }
+            ClientNavigatorTarget::Pane {
+                endpoint_id,
+                pane_id,
+            } => {
+                if self.config.confirm_pane_close {
+                    self.open_confirm_pane_close_overlay(&endpoint_id, pane_id);
+                } else {
+                    self.push_endpoint_method_to(
+                        &endpoint_id,
+                        crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                            pane_id,
+                        }),
+                        outcome,
+                    );
+                    self.retarget_navigator_selection_after_close();
+                }
+            }
+        }
+        outcome.repaint = true;
+    }
+
+    /// After a direct navigator close the popup stays open. Move selection to
+    /// the next row (or previous when closing the last row) so the highlight
+    /// does not fall back to the top of the list.
+    pub(super) fn retarget_navigator_selection_after_close(&mut self) {
+        let next = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                let selected =
+                    super::aggregate_navigation::navigator_selected_index(&rows, navigator)?;
+                rows.get(selected + 1)
+                    .or_else(|| selected.checked_sub(1).and_then(|prev| rows.get(prev)))
+                    .map(|row| row.target.clone())
+            }
+            _ => None,
+        });
+        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+            navigator.selected = next;
+        }
+    }
+
     pub(super) fn workspace_action_id(&self) -> Option<String> {
         self.navigate_workspace_id
             .as_ref()
@@ -478,6 +560,9 @@ impl ClientShellState {
 
     /// Restore the navigator saved on a confirm dialog after the dialog closes,
     /// whether the user accepted or dismissed it.
+    /// Put back the navigator a confirm dialog was opened from. Restoring is not
+    /// the same as closing: the caller retargets the selection only once a close
+    /// has actually been dispatched.
     pub(super) fn restore_navigator_after_confirm(
         &mut self,
         navigator: Option<Box<ClientNavigatorOverlay>>,
@@ -867,6 +952,10 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
+            if code == KeyCode::Char('x') && modifiers.is_empty() {
+                self.close_navigator_selection(outcome);
+                return;
+            }
             if code == KeyCode::Char(' ') && modifiers.is_empty() {
                 self.toggle_selected_navigator_workspace();
                 outcome.repaint = true;
@@ -1193,6 +1282,9 @@ impl ClientShellState {
         };
         self.push_endpoint_method_to(&endpoint_id, method, outcome);
         self.restore_navigator_after_confirm(return_to_navigator);
+        // The row we just closed is still selected. Move off it the way a direct
+        // close does, so the highlight does not point at a target that is gone.
+        self.retarget_navigator_selection_after_close();
     }
 
     /// Enter always accepts destructive confirmations; `keys.confirm_accept`
