@@ -202,6 +202,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # navigate_pane_up = "k"
 # navigate_pane_right = "l"     # right arrow always focuses the pane to the right
 
+# Confirmation dialogs. Enter always accepts, esc always cancels. This adds an
+# optional direct-key alias (e.g. "y" for tmux habit) for close workspace/tab/pane
+# and worktree remove dialogs. Unset by default; must not use prefix+ or esc.
+# confirm_accept = "y"
+
 # Custom commands use the same binding syntax.
 # type = "shell" runs detached in the background.
 # type = "pane" opens a temporary pane and closes it when the command exits.
