@@ -1311,6 +1311,47 @@ fn worktree_remove_escalates_recoverable_failure_to_force_confirmation() {
 }
 
 #[test]
+fn worktree_remove_accepts_confirm_alias() {
+    let config: Config = toml::from_str("[keys]\nconfirm_accept = \"y\"\n").unwrap();
+    let mut snapshot = snapshot();
+    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
+        key: "repo-key".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    let mut prepare = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::RemoveWorktree),
+        &mut prepare,
+    );
+    let [ClientShellAction::Endpoint { request, .. }] = &prepare.actions[..] else {
+        panic!("remove worktree should prepare through worktree.list");
+    };
+    let request_id = request.id.clone();
+    state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Ok(worktree_list_result(Some("ws_1"))),
+    );
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::WorktreeRemove(_))
+    ));
+    let remove = state.handle_input_bytes(b"y");
+    let [ClientShellAction::Endpoint { request, .. }] = &remove.actions[..] else {
+        panic!("worktree remove alias should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::WorktreeRemove(params)
+            if params.workspace_id == "ws_1" && !params.force
+    ));
+}
+
+#[test]
 fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     let mut config = ClientShellConfig::from_config(&Config::default());
     config.toast_delivery = crate::config::ToastDelivery::Herdr;
