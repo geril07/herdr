@@ -2800,3 +2800,48 @@ fn space_on_a_pane_row_does_not_toggle_anything() {
         "space on a pane row must not collapse its workspace"
     );
 }
+
+#[test]
+fn navigator_orders_worktree_groups_like_spaces_panel() {
+    let mut projected = snapshot();
+    let mut parent = projected.workspaces[0].clone();
+    parent.workspace_id = "ws_1".into();
+    parent.label = "va-web".into();
+    parent.number = 1;
+    parent.focused = false;
+    parent.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: false,
+    });
+    let mut standalone = parent.clone();
+    standalone.workspace_id = "ws_2".into();
+    standalone.label = "neovim".into();
+    standalone.number = 2;
+    standalone.active_tab_id = "tab_ws_2".into();
+    standalone.worktree = None;
+    standalone.focused = false;
+    let mut child = parent.clone();
+    child.workspace_id = "ws_3".into();
+    child.label = "feat".into();
+    child.number = 3;
+    child.active_tab_id = "tab_ws_3".into();
+    child.focused = false;
+    child.worktree = Some(ClientShellWorktree {
+        key: "repo".into(),
+        label: "repo".into(),
+        is_linked_worktree: true,
+    });
+    // Raw creation order: child was created after the unrelated workspace.
+    projected.workspaces = vec![parent, standalone, child];
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    assert_eq!(
+        navigator_workspace_keys(&state),
+        vec!["ws_1", "ws_3", "ws_2"],
+        "the grouped parent and its child lead, standalone workspaces follow"
+    );
+}

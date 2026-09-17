@@ -340,7 +340,15 @@ pub(super) fn navigator_rows(
                     .or_insert_with(Vec::new)
                     .push(pane);
             }
-            for workspace in &snapshot.workspaces {
+            // Grouped workspace order (parent, children, standalone) matching the
+            // spaces panel. Fully expanded grouping so the order stays stable
+            // regardless of sidebar collapse state.
+            let empty_collapsed_groups = HashSet::new();
+            let ordered = super::render::workspace_entries(snapshot, &empty_collapsed_groups);
+            for entry in ordered {
+                let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+                    continue;
+                };
                 let workspace_matches = endpoint_query_matches
                     || text(&workspace.label)
                     || workspace.branch.as_deref().is_some_and(text);
