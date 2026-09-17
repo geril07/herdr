@@ -65,7 +65,9 @@ pub(crate) fn render_client_overlay(
             render_release_notes_overlay(b, v, &s.update_install_command, p)
         }
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
-        ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
+        ClientShellOverlay::ConfirmClose(v) => {
+            render_confirm_close_overlay(b, v, confirm_accept_label(k), p)
+        }
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
         ClientShellOverlay::Navigator(v) => render_navigator_overlay(
             b,
@@ -94,7 +96,7 @@ pub(crate) fn render_client_overlay(
             worktree_overlays::render_worktree_open_overlay(b, v, p)
         }
         ClientShellOverlay::WorktreeRemove(v) => {
-            worktree_overlays::render_worktree_remove_overlay(b, v, p)
+            worktree_overlays::render_worktree_remove_overlay(b, v, confirm_accept_label(k), p)
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }
@@ -317,6 +319,16 @@ fn contrast(p: &Palette) -> ratatui::style::Color {
         ratatui::style::Color::Reset => p.surface_dim,
         c => c,
     }
+}
+
+/// First configured `keys.confirm_accept` alias for destructive dialogs, if any.
+/// All configured aliases work as input; only the first is shown on buttons.
+fn confirm_accept_label(k: &LiveKeybindConfig) -> Option<&str> {
+    k.keybinds
+        .confirm_accept
+        .bindings
+        .first()
+        .map(|binding| binding.label.as_str())
 }
 fn render_release_notes_overlay(
     b: &mut Buffer,
@@ -1394,6 +1406,7 @@ fn render_help_overlay(
 fn render_confirm_close_overlay(
     b: &mut Buffer,
     c: &ClientConfirmCloseOverlay,
+    accept_key: Option<&str>,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 64, 6)?;
@@ -1421,10 +1434,11 @@ fn render_confirm_close_overlay(
     let [ok, cancel] = rs.as_slice() else {
         return None;
     };
+    let accept = accept_key.map(|key| format!(" ↵/{key} confirm "));
     button(
         b,
         *ok,
-        " ↵ confirm ",
+        accept.as_deref().unwrap_or(" ↵ confirm "),
         Style::default()
             .fg(contrast(p))
             .bg(p.red)

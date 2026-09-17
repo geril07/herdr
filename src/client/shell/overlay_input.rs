@@ -1273,7 +1273,7 @@ impl ClientShellState {
         }
 
         if matches!(self.overlay, Some(ClientShellOverlay::ConfirmClose(_))) {
-            if key.code == KeyCode::Enter {
+            if self.confirm_accept_pressed(key) {
                 let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
                     return;
                 };
@@ -1435,6 +1435,18 @@ impl ClientShellState {
             self.push_endpoint_method(method, outcome);
         }
         outcome.repaint = true;
+    }
+
+    /// Enter always accepts destructive confirmations; `keys.confirm_accept`
+    /// adds an optional direct-key alias (e.g. "y"). Modal-only, so plain keys are safe.
+    pub(super) fn confirm_accept_pressed(&self, key: &crate::input::TerminalKey) -> bool {
+        key.code == KeyCode::Enter
+            || self
+                .config
+                .keybinds
+                .keybinds
+                .confirm_accept
+                .matches_direct_key(key)
     }
 
     pub(super) fn open_confirm_close_overlay(&mut self, workspace_id: String) {

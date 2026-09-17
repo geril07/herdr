@@ -632,6 +632,69 @@ fn pane_close_keybind_cancel_keeps_pane() {
 }
 
 #[test]
+fn confirm_accept_alias_confirms_close_dialog() {
+    let config: Config = toml::from_str("[keys]\nconfirm_accept = \"y\"\n").unwrap();
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+        &mut close,
+    );
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(_))
+    ));
+    let frame = state.compose(106, 20).expect("pane confirmation overlay");
+    let text = frame
+        .cells
+        .chunks(frame.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(|cell| cell.symbol.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains("/y confirm"),
+        "alias should be visible on the accept button"
+    );
+    let confirm = state.handle_input_bytes(b"y");
+    let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
+        panic!("pane confirmation alias should use endpoint API");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+    assert!(state.overlay.is_none());
+}
+
+#[test]
+fn confirm_dialog_ignores_y_without_alias() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+        &mut close,
+    );
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(_))
+    ));
+    let ignored = state.handle_input_bytes(b"y");
+    assert!(ignored.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(_))
+    ));
+}
+
+#[test]
 fn pane_close_keybind_closes_directly_when_disabled() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.config.confirm_pane_close = false;
