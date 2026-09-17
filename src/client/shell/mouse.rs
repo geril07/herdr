@@ -1733,8 +1733,12 @@ impl ClientShellState {
                             return;
                         };
                         match confirm.target {
-                            ClientConfirmCloseTarget::Workspace { workspace_id } => {
-                                self.push_endpoint_method(
+                            ClientConfirmCloseTarget::Workspace {
+                                endpoint_id,
+                                workspace_id,
+                            } => {
+                                self.push_endpoint_method_to(
+                                    &endpoint_id,
                                     crate::api::schema::Method::WorkspaceClose(
                                         crate::api::schema::WorkspaceCloseParams {
                                             workspace_id,
@@ -1744,16 +1748,24 @@ impl ClientShellState {
                                     outcome,
                                 );
                             }
-                            ClientConfirmCloseTarget::Pane { pane_id } => {
-                                self.push_endpoint_method(
+                            ClientConfirmCloseTarget::Pane {
+                                endpoint_id,
+                                pane_id,
+                            } => {
+                                self.push_endpoint_method_to(
+                                    &endpoint_id,
                                     crate::api::schema::Method::PaneClose(
                                         crate::api::schema::PaneTarget { pane_id },
                                     ),
                                     outcome,
                                 );
                             }
-                            ClientConfirmCloseTarget::Tab { tab_id } => {
-                                self.push_endpoint_method(
+                            ClientConfirmCloseTarget::Tab {
+                                endpoint_id,
+                                tab_id,
+                            } => {
+                                self.push_endpoint_method_to(
+                                    &endpoint_id,
                                     crate::api::schema::Method::TabClose(
                                         crate::api::schema::TabTarget { tab_id },
                                     ),

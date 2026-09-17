@@ -2091,6 +2091,212 @@ fn navigator_space_keeps_selection_and_collapses_to_parent() {
 }
 
 #[test]
+fn navigator_x_closes_selected_pane_and_keeps_popup_open() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.confirm_close = false;
+    state.config.confirm_tab_close = false;
+    state.config.confirm_pane_close = false;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    // snapshot() focuses pane_1, so selection starts on the pane row.
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(
+        crate::input::TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()),
+    )]);
+    let [ClientShellAction::Endpoint {
+        endpoint_id,
+        request,
+        ..
+    }] = &outcome.actions[..]
+    else {
+        panic!(
+            "x should close the selected pane, got {:?}",
+            outcome.actions
+        );
+    };
+    assert_eq!(endpoint_id, &ClientEndpointId::Local);
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+    // The popup stays open and selection moves to the previous row (the tab).
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("navigator should stay open after close");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    assert_eq!(
+        aggregate_navigation::selected_navigator_target(&rows, navigator),
+        Some(ClientNavigatorTarget::Tab {
+            endpoint_id: ClientEndpointId::Local,
+            tab_id: "tab_1".into(),
+        })
+    );
+}
+
+#[test]
+fn navigator_x_closes_workspace_and_tab_by_selection() {
+    for (target, check) in [
+        (
+            ClientNavigatorTarget::Workspace {
+                endpoint_id: ClientEndpointId::Local,
+                workspace_id: "ws_1".into(),
+            },
+            "workspace",
+        ),
+        (
+            ClientNavigatorTarget::Tab {
+                endpoint_id: ClientEndpointId::Local,
+                tab_id: "tab_1".into(),
+            },
+            "tab",
+        ),
+    ] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.config.confirm_close = false;
+        state.config.confirm_tab_close = false;
+        state.config.confirm_pane_close = false;
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.open_navigator_overlay();
+        if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+            navigator.selected = Some(target.clone());
+        }
+        let outcome = state.handle_raw_events(vec![RawInputEvent::Key(
+            crate::input::TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()),
+        )]);
+        let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+            panic!("x should close the selected {check}");
+        };
+        match (&request.method, &target) {
+            (
+                crate::api::schema::Method::WorkspaceClose(params),
+                ClientNavigatorTarget::Workspace { workspace_id, .. },
+            ) => {
+                assert_eq!(&params.workspace_id, workspace_id);
+                assert!(params.close_group);
+            }
+            (
+                crate::api::schema::Method::TabClose(params),
+                ClientNavigatorTarget::Tab { tab_id, .. },
+            ) => assert_eq!(&params.tab_id, tab_id),
+            (method, _) => panic!("wrong close method for {check}: {method:?}"),
+        }
+        assert!(
+            matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+            "navigator should stay open after closing {check}"
+        );
+    }
+}
+
+#[test]
+fn navigator_x_on_machine_row_is_a_noop() {
+    let (mut state, endpoint_id) = state_with_remote();
+    state.config.confirm_close = false;
+    state.config.confirm_tab_close = false;
+    state.config.confirm_pane_close = false;
+    state.open_navigator_overlay();
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Machine {
+            endpoint_id: endpoint_id.clone(),
+        });
+    }
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(
+        crate::input::TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()),
+    )]);
+    assert!(outcome.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Navigator(_))
+    ));
+}
+
+#[test]
+fn navigator_x_respects_close_confirmation_settings() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    assert!(state.config.confirm_pane_close);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(
+        crate::input::TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()),
+    )]);
+    assert!(outcome.actions.is_empty());
+    assert!(matches!(
+        state.overlay.as_ref(),
+        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
+            target:
+                ClientConfirmCloseTarget::Pane {
+                    pane_id, ..
+                },
+            ..
+        })) if pane_id == "pane_1"
+    ));
+}
+
+#[test]
+fn navigator_x_closes_remote_target_on_its_endpoint() {
+    let (mut state, endpoint_id) = state_with_remote();
+    state.config.confirm_close = false;
+    state.config.confirm_tab_close = false;
+    state.config.confirm_pane_close = false;
+    state.open_navigator_overlay();
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Pane {
+            endpoint_id: endpoint_id.clone(),
+            pane_id: "pane_1".into(),
+        });
+    }
+    let outcome = state.handle_raw_events(vec![RawInputEvent::Key(
+        crate::input::TerminalKey::new(KeyCode::Char('x'), KeyModifiers::empty()),
+    )]);
+    let [ClientShellAction::Endpoint {
+        endpoint_id: target,
+        request,
+        ..
+    }] = &outcome.actions[..]
+    else {
+        panic!("x should close the remote pane, got {:?}", outcome.actions);
+    };
+    assert_eq!(target, &endpoint_id);
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Navigator(_))
+    ));
+}
+
+#[test]
+fn navigator_x_types_in_search_instead_of_closing() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.config.confirm_close = false;
+    state.config.confirm_tab_close = false;
+    state.config.confirm_pane_close = false;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    let press = |state: &mut ClientShellState, code| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code,
+            KeyModifiers::empty(),
+        ))])
+    };
+    press(&mut state, KeyCode::Char('/'));
+    let outcome = press(&mut state, KeyCode::Char('x'));
+    assert!(outcome.actions.is_empty());
+    let ClientShellOverlay::Navigator(navigator) = state.overlay.as_ref().expect("navigator")
+    else {
+        panic!("expected navigator");
+    };
+    assert!(navigator.search_focused);
+    assert_eq!(navigator.query.as_str(), "x");
+}
+
+#[test]
 fn navigator_search_ctrl_w_deletes_word_back() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

@@ -354,6 +354,106 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
+    pub(super) fn close_navigator_selection(&mut self, outcome: &mut ClientShellInput) {
+        // Machine rows are group headers and cannot be closed.
+        let target = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                super::aggregate_navigation::selected_navigator_target(&rows, navigator)
+            }
+            _ => None,
+        });
+        let Some(target) = target else {
+            return;
+        };
+        match target {
+            ClientNavigatorTarget::Machine { .. } => return,
+            ClientNavigatorTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+            } => {
+                if self.config.confirm_close {
+                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
+                } else {
+                    self.push_endpoint_method_to(
+                        &endpoint_id,
+                        crate::api::schema::Method::WorkspaceClose(
+                            crate::api::schema::WorkspaceCloseParams {
+                                workspace_id,
+                                close_group: true,
+                            },
+                        ),
+                        outcome,
+                    );
+                    self.retarget_navigator_selection_after_close();
+                }
+            }
+            ClientNavigatorTarget::Tab {
+                endpoint_id,
+                tab_id,
+            } => {
+                if self.config.confirm_tab_close {
+                    self.open_confirm_tab_close_overlay(&endpoint_id, tab_id);
+                } else {
+                    self.push_endpoint_method_to(
+                        &endpoint_id,
+                        crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
+                            tab_id,
+                        }),
+                        outcome,
+                    );
+                    self.retarget_navigator_selection_after_close();
+                }
+            }
+            ClientNavigatorTarget::Pane {
+                endpoint_id,
+                pane_id,
+            } => {
+                if self.config.confirm_pane_close {
+                    self.open_confirm_pane_close_overlay(&endpoint_id, pane_id);
+                } else {
+                    self.push_endpoint_method_to(
+                        &endpoint_id,
+                        crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+                            pane_id,
+                        }),
+                        outcome,
+                    );
+                    self.retarget_navigator_selection_after_close();
+                }
+            }
+        }
+        outcome.repaint = true;
+    }
+
+    /// After a direct navigator close the popup stays open. Move selection to
+    /// the next row (or previous when closing the last row) so the highlight
+    /// does not fall back to the top of the list.
+    fn retarget_navigator_selection_after_close(&mut self) {
+        let next = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                let selected =
+                    super::aggregate_navigation::navigator_selected_index(&rows, navigator)?;
+                rows.get(selected + 1)
+                    .or_else(|| selected.checked_sub(1).and_then(|prev| rows.get(prev)))
+                    .map(|row| row.target.clone())
+            }
+            _ => None,
+        });
+        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+            navigator.selected = next;
+        }
+    }
+
     pub(super) fn toggle_selected_navigator_workspace(&mut self) {
         // (endpoint, workspace, flip). Workspace rows flip their own expansion;
         // tab/pane rows collapse the parent workspace. Selection always ends
@@ -966,6 +1066,10 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
+            if code == KeyCode::Char('x') && modifiers.is_empty() {
+                self.close_navigator_selection(outcome);
+                return;
+            }
             return;
         }
 
@@ -1278,30 +1382,45 @@ impl ClientShellState {
                     return;
                 };
                 match confirm.target {
-                    ClientConfirmCloseTarget::Workspace { workspace_id } => {
-                        self.push_endpoint_method(
+                    ClientConfirmCloseTarget::Workspace {
+                        endpoint_id,
+                        workspace_id,
+                    } => {
+                        self.push_endpoint_method_to_with_kind(
+                            &endpoint_id,
                             crate::api::schema::Method::WorkspaceClose(
                                 crate::api::schema::WorkspaceCloseParams {
                                     workspace_id,
                                     close_group: true,
                                 },
                             ),
+                            PendingEndpointKind::Generic,
                             outcome,
                         );
                     }
-                    ClientConfirmCloseTarget::Pane { pane_id } => {
-                        self.push_endpoint_method(
+                    ClientConfirmCloseTarget::Pane {
+                        endpoint_id,
+                        pane_id,
+                    } => {
+                        self.push_endpoint_method_to_with_kind(
+                            &endpoint_id,
                             crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
                                 pane_id,
                             }),
+                            PendingEndpointKind::Generic,
                             outcome,
                         );
                     }
-                    ClientConfirmCloseTarget::Tab { tab_id } => {
-                        self.push_endpoint_method(
+                    ClientConfirmCloseTarget::Tab {
+                        endpoint_id,
+                        tab_id,
+                    } => {
+                        self.push_endpoint_method_to_with_kind(
+                            &endpoint_id,
                             crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
                                 tab_id,
                             }),
+                            PendingEndpointKind::Generic,
                             outcome,
                         );
                     }
@@ -1449,8 +1568,17 @@ impl ClientShellState {
                 .matches_direct_key(key)
     }
 
-    pub(super) fn open_confirm_close_overlay(&mut self, workspace_id: String) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
+    pub(super) fn open_confirm_close_overlay(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        workspace_id: String,
+    ) {
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
             return;
         };
         let Some(workspace) = snapshot
@@ -1502,7 +1630,10 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
-                target: ClientConfirmCloseTarget::Workspace { workspace_id },
+                target: ClientConfirmCloseTarget::Workspace {
+                    endpoint_id: endpoint_id.clone(),
+                    workspace_id,
+                },
                 title: if closes_group {
                     "Close worktree group?".to_owned()
                 } else {
@@ -1513,32 +1644,50 @@ impl ClientShellState {
         ));
     }
 
-    pub(super) fn open_confirm_pane_close_overlay(&mut self, pane_id: String) {
+    pub(super) fn open_confirm_pane_close_overlay(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        pane_id: String,
+    ) {
         let detail = self
-            .snapshot
-            .as_deref()
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
             .and_then(|snapshot| snapshot.panes.iter().find(|pane| pane.pane_id == pane_id))
             .map(|pane| pane.label.clone().unwrap_or_else(|| pane.pane_id.clone()))
             .unwrap_or_else(|| pane_id.clone());
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
-                target: ClientConfirmCloseTarget::Pane { pane_id },
+                target: ClientConfirmCloseTarget::Pane {
+                    endpoint_id: endpoint_id.clone(),
+                    pane_id,
+                },
                 title: "Close pane?".to_owned(),
                 detail,
             },
         ));
     }
 
-    pub(super) fn open_confirm_tab_close_overlay(&mut self, tab_id: String) {
+    pub(super) fn open_confirm_tab_close_overlay(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        tab_id: String,
+    ) {
         let detail = self
-            .snapshot
-            .as_deref()
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
             .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
             .map(|tab| tab.label.clone())
             .unwrap_or_else(|| tab_id.clone());
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
-                target: ClientConfirmCloseTarget::Tab { tab_id },
+                target: ClientConfirmCloseTarget::Tab {
+                    endpoint_id: endpoint_id.clone(),
+                    tab_id,
+                },
                 title: "Close tab?".to_owned(),
                 detail,
             },
