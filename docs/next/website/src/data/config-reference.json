@@ -578,6 +578,12 @@
           "description": "Focus the pane to the right in navigate mode. Right arrow is always an alias."
         },
         {
+          "key": "keys.confirm_accept",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Optional direct-key alias that accepts destructive confirmation dialogs, such as close workspace, tab, or pane, and worktree remove. Enter always accepts and Esc always cancels."
+        },
+        {
           "key": "keys.detach",
           "type": "keybinding",
           "default": "\"prefix+q\"",

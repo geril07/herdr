@@ -377,6 +377,9 @@ pub struct KeysConfig {
     pub navigate_pane_up: BindingConfig,
     /// Focus the pane to the right in navigate mode. Default: "l". Right arrow is always an alias.
     pub navigate_pane_right: BindingConfig,
+    /// Additional key to accept destructive confirmation dialogs (close workspace/tab/pane,
+    /// delete worktree checkout). Enter always accepts, Esc always cancels. Unset by default.
+    pub confirm_accept: BindingConfig,
     /// Detach the current client from its Herdr server. Default: "prefix+q".
     pub detach: BindingConfig,
     /// Reload config.toml in the running app/server. Default: "prefix+shift+r".
@@ -514,6 +517,8 @@ pub(crate) struct KeysConfigOverlay {
     navigate_pane_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_pane_right: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confirm_accept: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detach: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -668,6 +673,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(navigate_pane_down);
         apply_field!(navigate_pane_up);
         apply_field!(navigate_pane_right);
+        apply_field!(confirm_accept);
         apply_field!(detach);
         apply_field!(reload_config);
         apply_field!(open_notification_target);
@@ -773,6 +779,7 @@ impl KeysConfig {
         copy_effective_action_field!(navigate_pane_down, keybinds.navigate.pane_down);
         copy_effective_action_field!(navigate_pane_up, keybinds.navigate.pane_up);
         copy_effective_action_field!(navigate_pane_right, keybinds.navigate.pane_right);
+        copy_effective_action_field!(confirm_accept, keybinds.confirm_accept);
         copy_effective_action_field!(detach, keybinds.detach);
         copy_effective_action_field!(reload_config, keybinds.reload_config);
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
@@ -1166,6 +1173,7 @@ impl Default for KeysConfig {
             navigate_pane_down: BindingConfig::one("j"),
             navigate_pane_up: BindingConfig::one("k"),
             navigate_pane_right: BindingConfig::one("l"),
+            confirm_accept: BindingConfig::empty(),
             detach: BindingConfig::one("prefix+q"),
             reload_config: BindingConfig::one("prefix+shift+r"),
             open_notification_target: BindingConfig::one("prefix+o"),
