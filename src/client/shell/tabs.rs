@@ -82,6 +82,16 @@ pub(crate) fn tab_indicator_prefix_width(count: usize, spacing: bool) -> u16 {
     }
 }
 
+fn tab_number(tab: &ClientShellTab, index: usize, config: &ClientShellConfig) -> Option<String> {
+    (config.tab_bar_numbers && tab.custom_label).then(|| (index + 1).to_string())
+}
+
+fn tab_number_prefix_width(number: Option<&str>) -> u16 {
+    number
+        .map(|number| display_width(number).saturating_add(1))
+        .unwrap_or(0)
+}
+
 pub(crate) fn render_tab_bar(
     buffer: &mut Buffer,
     area: Rect,
@@ -103,15 +113,22 @@ pub(crate) fn render_tab_bar(
         .iter()
         .map(|tab| tab_agent_statuses(&tab.tab_id, snapshot, config))
         .collect::<Vec<_>>();
-    let desired_widths = tabs
+    let tab_labels = tabs.iter().map(|tab| tab_label(tab)).collect::<Vec<_>>();
+    let tab_numbers = tabs
         .iter()
+        .enumerate()
+        .map(|(index, tab)| tab_number(tab, index, config))
+        .collect::<Vec<_>>();
+    let desired_widths = tab_labels
+        .iter()
+        .zip(&tab_numbers)
         .zip(&tab_statuses)
-        .map(|(tab, statuses)| {
-            let label = tab_label(tab);
+        .map(|((label, number), statuses)| {
             let indicator_width =
                 tab_indicator_prefix_width(statuses.len(), config.tab_status_spacing);
-            display_width(&label)
+            display_width(label)
                 .saturating_add(indicator_width)
+                .saturating_add(tab_number_prefix_width(number.as_deref()))
                 .saturating_add(4)
                 .max(MIN_TAB_WIDTH)
         })
@@ -180,7 +197,8 @@ pub(crate) fn render_tab_bar(
     let mut first_visible = None;
     let mut last_visible = None;
     for (index, tab) in tabs.iter().enumerate().skip(*tab_scroll) {
-        let name = tab_label(tab);
+        let name = &tab_labels[index];
+        let number = tab_numbers[index].as_deref();
         let statuses = &tab_statuses[index];
         let desired = desired_widths[index];
         let remaining = tab_right.saturating_sub(x);
@@ -213,7 +231,10 @@ pub(crate) fn render_tab_bar(
 
         let indicator_prefix_width =
             tab_indicator_prefix_width(statuses.len(), config.tab_status_spacing);
-        let total_content_width = display_width(&name).saturating_add(indicator_prefix_width);
+        let number_prefix_width = tab_number_prefix_width(number);
+        let total_content_width = display_width(name)
+            .saturating_add(indicator_prefix_width)
+            .saturating_add(number_prefix_width);
         let padding = width.saturating_sub(total_content_width);
         let left = padding / 2;
         let mut cur_x = rect.x.saturating_add(left);
@@ -235,9 +256,21 @@ pub(crate) fn render_tab_bar(
             cur_x = cur_x.saturating_add(1);
         }
 
+        if let Some(number) = number {
+            if cur_x < rect.right() {
+                let avail = rect.right().saturating_sub(cur_x);
+                put_text(buffer, cur_x, rect.y, avail, number, style);
+            }
+            cur_x = cur_x.saturating_add(display_width(number));
+            if cur_x < rect.right() {
+                put_text(buffer, cur_x, rect.y, 1, " ", style);
+            }
+            cur_x = cur_x.saturating_add(1);
+        }
+
         if cur_x < rect.right() {
             let avail = rect.right().saturating_sub(cur_x);
-            put_text(buffer, cur_x, rect.y, avail, &name, style);
+            put_text(buffer, cur_x, rect.y, avail, name, style);
         }
 
         hits.tabs.push((rect, tab.tab_id.clone()));
@@ -793,6 +826,63 @@ mod tests {
         assert_eq!(tab2_dots[0].style().bg, Some(config.palette.surface0));
         assert_eq!(tab2_dots[1].style().fg, Some(config.palette.red));
         assert_eq!(tab2_dots[1].style().bg, Some(config.palette.surface0));
+    }
+
+    #[test]
+    fn test_render_tab_bar_numbers_follow_status_indicators() {
+        let mut snapshot = make_test_snapshot();
+        snapshot.tabs[0].label = "main".into();
+        snapshot.tabs[0].custom_label = true;
+        snapshot.tabs[1].label = "logs".into();
+        snapshot.tabs[1].custom_label = true;
+        snapshot.tabs[1].number = 7;
+        let mut cfg = Config::default();
+        cfg.ui.tab_bar_numbers = true;
+        let config = ClientShellConfig::from_config(&cfg);
+        let area = Rect::new(0, 0, 50, 1);
+        let mut buffer = Buffer::empty(area);
+        let mut tab_scroll = 0;
+        let mut reveal = false;
+        let mut hits = ShellHitMap::default();
+
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut tab_scroll,
+            &mut reveal,
+            None,
+            &mut hits,
+        );
+
+        let row_text: String = (0..area.width)
+            .map(|x| buffer[(x, 0)].symbol().to_string())
+            .collect();
+        assert!(row_text.contains("● 1 main"));
+        assert!(row_text.contains("● ● 2 logs"));
+
+        let active_rect = hits.tabs[0].0;
+        let active_number = (active_rect.x..active_rect.right())
+            .map(|x| &buffer[(x, 0)])
+            .find(|cell| cell.symbol() == "1")
+            .expect("active tab number");
+        let active_label = (active_rect.x..active_rect.right())
+            .map(|x| &buffer[(x, 0)])
+            .find(|cell| cell.symbol() == "m")
+            .expect("active tab label");
+        assert_eq!(active_number.style(), active_label.style());
+
+        let inactive_rect = hits.tabs[1].0;
+        let inactive_number = (inactive_rect.x..inactive_rect.right())
+            .map(|x| &buffer[(x, 0)])
+            .find(|cell| cell.symbol() == "2")
+            .expect("inactive tab number");
+        let inactive_label = (inactive_rect.x..inactive_rect.right())
+            .map(|x| &buffer[(x, 0)])
+            .find(|cell| cell.symbol() == "l")
+            .expect("inactive tab label");
+        assert_eq!(inactive_number.style(), inactive_label.style());
     }
 
     #[test]

@@ -142,6 +142,7 @@ impl ClientShellConfig {
             sidebar_position: config.ui.sidebar_position,
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
+            tab_bar_numbers: config.ui.tab_bar_numbers,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             tab_status: config.ui.tab_status,
             tab_status_idle: config.ui.tab_status_idle,
@@ -354,6 +355,7 @@ impl ClientShellConfig {
                 self.sidebar_position = ui.sidebar_position;
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
+                self.tab_bar_numbers = ui.tab_bar_numbers;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
                 self.tab_status = ui.tab_status;
                 self.tab_status_idle = ui.tab_status_idle;
@@ -511,6 +513,7 @@ mod tests {
         next.ui.sidebar_width = 31;
         next.ui.sidebar_position = SidebarPositionConfig::Right;
         next.ui.tab_bar_position = TabBarPositionConfig::Bottom;
+        next.ui.tab_bar_numbers = true;
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
         next.ui.tab_status = false;
@@ -528,6 +531,7 @@ mod tests {
         assert_eq!(shell.sidebar_position, SidebarPositionConfig::Right);
         assert!(shell.sidebar_on_right());
         assert_eq!(shell.tab_bar_position, TabBarPositionConfig::Bottom);
+        assert!(shell.tab_bar_numbers);
         assert_eq!(
             shell.agent_panel_sort,
             crate::config::AgentPanelSortConfig::Priority

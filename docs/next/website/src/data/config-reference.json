@@ -1062,6 +1062,12 @@
           ]
         },
         {
+          "key": "ui.tab_bar_numbers",
+          "type": "boolean",
+          "default": "false",
+          "description": "Show position numbers before custom-named desktop tabs."
+        },
+        {
           "key": "ui.tab_bar_right",
           "type": "array",
           "default": "[]",
