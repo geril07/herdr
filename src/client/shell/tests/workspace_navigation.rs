@@ -912,6 +912,161 @@ fn cancelled_close_does_not_restore_an_older_navigation_highlight() {
     assert_local_highlight(&mut state, "ws_1");
 }
 
+/// Open a confirm dialog while the navigator popup is the active overlay.
+fn state_with_navigator_then_confirm(
+    confirm: impl FnOnce(&mut ClientShellState),
+) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_navigator_overlay();
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::Navigator(_))
+    ));
+    confirm(&mut state);
+    state
+}
+
+fn open_pane_confirm(state: &mut ClientShellState) {
+    assert!(state.config.confirm_pane_close);
+    let mut close = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+        &mut close,
+    );
+    assert!(close.actions.is_empty());
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(
+            ClientConfirmCloseOverlay {
+                pane_target: Some(_),
+                return_to_navigator: Some(_),
+                ..
+            }
+        ))
+    ));
+}
+
+#[test]
+fn pane_confirm_cancel_returns_to_the_navigator_without_navigate_mode() {
+    let mut state = state_with_navigator_then_confirm(open_pane_confirm);
+    preview_key(&mut state, b"\x1b");
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "esc should return to the navigator, got {:?}",
+        state.overlay
+    );
+    assert_ne!(
+        state.mode,
+        ClientShellMode::Navigate,
+        "cancelling a pane close must not enter navigate mode"
+    );
+}
+
+#[test]
+fn workspace_confirm_cancel_returns_to_the_navigator() {
+    let mut state = state_with_navigator_then_confirm(|state| {
+        state.open_confirm_close_overlay("ws_1".into());
+    });
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ConfirmClose(
+            ClientConfirmCloseOverlay {
+                return_to_navigator: Some(_),
+                ..
+            }
+        ))
+    ));
+    preview_key(&mut state, b"\x1b");
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "esc should return to the navigator instead of the navigation sidebar"
+    );
+}
+
+#[test]
+fn pane_confirm_accept_keeps_the_navigator_open() {
+    let mut state = state_with_navigator_then_confirm(open_pane_confirm);
+    let outcome = state.handle_input_bytes(b"\r");
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!(
+            "enter should confirm the pane close, got {:?}",
+            outcome.actions
+        );
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "confirming should keep the navigator open"
+    );
+}
+
+#[test]
+fn pane_confirm_click_outside_returns_to_the_navigator() {
+    let mut state = state_with_navigator_then_confirm(open_pane_confirm);
+    state.compose(106, 20).expect("confirm frame");
+    // A cell outside the dialog clears it.
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(outcome.actions.is_empty());
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "clicking outside should return to the navigator"
+    );
+}
+
+#[test]
+fn pane_confirm_mouse_accept_keeps_the_navigator_open() {
+    let mut state = state_with_navigator_then_confirm(open_pane_confirm);
+    state.compose(106, 20).expect("confirm frame");
+    let accept = state.hits.overlay_primary;
+    assert!(!accept.is_empty(), "confirm needs an accept button hit");
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: accept.x,
+            row: accept.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("clicking accept should confirm the pane close");
+    };
+    assert!(matches!(
+        &request.method,
+        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
+    ));
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "accepting with the mouse should keep the navigator open"
+    );
+}
+
+#[test]
+fn stale_pane_confirm_accept_still_returns_to_the_navigator() {
+    let mut state = state_with_navigator_then_confirm(open_pane_confirm);
+    state
+        .snapshot
+        .as_mut()
+        .expect("snapshot")
+        .panes
+        .retain(|pane| pane.pane_id != "pane_1");
+    let outcome = state.handle_input_bytes(b"\r");
+    assert!(outcome.actions.is_empty());
+    assert!(
+        matches!(state.overlay, Some(ClientShellOverlay::Navigator(_))),
+        "the error path must not lose the navigator"
+    );
+}
+
 #[test]
 fn coalesced_navigation_focus_does_not_leave_a_permanent_highlight() {
     let mut state = local_navigation_state(false);

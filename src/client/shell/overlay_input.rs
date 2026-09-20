@@ -422,6 +422,24 @@ impl ClientShellState {
         }));
     }
 
+    /// Snapshot the open navigator so a confirm dialog can return to it
+    /// instead of dropping the popup.
+    pub(super) fn navigator_for_confirm(&self) -> Option<Box<ClientNavigatorOverlay>> {
+        match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Navigator(navigator)) => Some(Box::new(navigator.clone())),
+            _ => None,
+        }
+    }
+
+    /// Restore the navigator saved on a confirm dialog after the dialog closes,
+    /// whether the user accepted or dismissed it.
+    pub(super) fn restore_navigator_after_confirm(
+        &mut self,
+        navigator: Option<Box<ClientNavigatorOverlay>>,
+    ) {
+        self.overlay = navigator.map(|navigator| ClientShellOverlay::Navigator(*navigator));
+    }
+
     pub(super) fn open_rename_pane_overlay(&mut self) {
         let Some(snapshot) = self.snapshot.as_deref() else {
             return;
@@ -879,10 +897,25 @@ impl ClientShellState {
             if self.confirm_accept_pressed(key) {
                 self.accept_close_confirmation(outcome);
             } else if key.code == KeyCode::Esc {
-                self.overlay = None;
-                self.mode = ClientShellMode::Navigate;
-                self.navigate_workspace_id = self.focused_navigation_target();
-                self.reveal_navigation_workspace = true;
+                let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
+                    return;
+                };
+                match confirm.return_to_navigator {
+                    Some(navigator) => {
+                        self.overlay = Some(ClientShellOverlay::Navigator(*navigator));
+                    }
+                    None => {
+                        self.overlay = None;
+                        // Only a workspace close returns to the navigation
+                        // sidebar. Dismissing a tab or pane confirmation must not
+                        // drop the user into navigate mode.
+                        if confirm.tab_target.is_none() && confirm.pane_target.is_none() {
+                            self.mode = ClientShellMode::Navigate;
+                            self.navigate_workspace_id = self.focused_navigation_target();
+                            self.reveal_navigation_workspace = true;
+                        }
+                    }
+                }
                 outcome.repaint = true;
             }
             return;
@@ -1022,6 +1055,7 @@ impl ClientShellState {
             return;
         };
         outcome.repaint = true;
+        let return_to_navigator = confirm.return_to_navigator;
         let method = if let Some(target) = confirm.tab_target {
             if target.workspace.endpoint_id != self.active_endpoint_id
                 || !self.navigation_target_valid(&target.workspace)
@@ -1035,6 +1069,8 @@ impl ClientShellState {
                 self.receive_endpoint_unavailable(
                     "Close target changed; try closing the tab again".into(),
                 );
+                // Still leave the dialog behind the navigator it was opened from.
+                self.restore_navigator_after_confirm(return_to_navigator);
                 return;
             }
             crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
@@ -1056,6 +1092,8 @@ impl ClientShellState {
                 self.receive_endpoint_unavailable(
                     "Close target changed; try closing the pane again".into(),
                 );
+                // Still leave the dialog behind the navigator it was opened from.
+                self.restore_navigator_after_confirm(return_to_navigator);
                 return;
             }
             crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
@@ -1068,6 +1106,7 @@ impl ClientShellState {
             })
         };
         self.push_endpoint_method(method, outcome);
+        self.restore_navigator_after_confirm(return_to_navigator);
     }
 
     /// Enter always accepts destructive confirmations; `keys.confirm_accept`
@@ -1108,6 +1147,7 @@ impl ClientShellState {
                 pane_target: Some(ClientPaneCloseConfirmation { pane_id, workspace }),
                 title: "Close pane?".to_owned(),
                 detail,
+                return_to_navigator: self.navigator_for_confirm(),
             },
         ));
         true
@@ -1188,6 +1228,7 @@ impl ClientShellState {
                     "Close workspace?".to_owned()
                 },
                 detail: format!("{} — {scope}", workspace.label),
+                return_to_navigator: self.navigator_for_confirm(),
             },
         ));
         true
