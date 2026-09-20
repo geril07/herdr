@@ -430,6 +430,27 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
+    /// Snapshot the open navigator so a confirm dialog can return to it
+    /// instead of dropping the popup.
+    pub(super) fn navigator_for_confirm(&self) -> Option<ClientNavigatorOverlay> {
+        match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Navigator(navigator)) => Some(navigator.clone()),
+            _ => None,
+        }
+    }
+
+    /// Restore the navigator saved on a confirm dialog after the close is
+    /// confirmed. Selection moves off the closing row like a direct close.
+    pub(super) fn restore_navigator_after_confirm(
+        &mut self,
+        navigator: Option<ClientNavigatorOverlay>,
+    ) {
+        self.overlay = navigator.map(ClientShellOverlay::Navigator);
+        if self.overlay.is_some() {
+            self.retarget_navigator_selection_after_close();
+        }
+    }
+
     /// After a direct navigator close the popup stays open. Move selection to
     /// the next row (or previous when closing the last row) so the highlight
     /// does not fall back to the top of the list.
@@ -1381,7 +1402,12 @@ impl ClientShellState {
                 let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
                     return;
                 };
-                match confirm.target {
+                let ClientConfirmCloseOverlay {
+                    target,
+                    return_to_navigator,
+                    ..
+                } = confirm;
+                match target {
                     ClientConfirmCloseTarget::Workspace {
                         endpoint_id,
                         workspace_id,
@@ -1425,24 +1451,28 @@ impl ClientShellState {
                         );
                     }
                 }
+                self.restore_navigator_after_confirm(return_to_navigator);
                 outcome.repaint = true;
             } else if key.code == KeyCode::Esc {
-                let workspace_close = matches!(
-                    self.overlay,
-                    Some(ClientShellOverlay::ConfirmClose(
-                        ClientConfirmCloseOverlay {
-                            target: ClientConfirmCloseTarget::Workspace { .. },
-                            ..
+                let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
+                    return;
+                };
+                let workspace_close =
+                    matches!(confirm.target, ClientConfirmCloseTarget::Workspace { .. });
+                match confirm.return_to_navigator {
+                    Some(navigator) => {
+                        self.overlay = Some(ClientShellOverlay::Navigator(navigator));
+                    }
+                    None => {
+                        self.overlay = None;
+                        if workspace_close {
+                            self.mode = ClientShellMode::Navigate;
+                            self.navigate_workspace_id = self.focused_navigation_target();
+                            self.navigate_agent = self.initial_agent_target();
+                            self.navigate_section = SidebarNavSection::Spaces;
+                            self.reveal_navigation_workspace = true;
                         }
-                    ))
-                );
-                self.overlay = None;
-                if workspace_close {
-                    self.mode = ClientShellMode::Navigate;
-                    self.navigate_workspace_id = self.focused_navigation_target();
-                    self.navigate_agent = self.initial_agent_target();
-                    self.navigate_section = SidebarNavSection::Spaces;
-                    self.reveal_navigation_workspace = true;
+                    }
                 }
                 outcome.repaint = true;
             }
@@ -1640,6 +1670,7 @@ impl ClientShellState {
                     "Close workspace?".to_owned()
                 },
                 detail: format!("{} — {scope}", workspace.label),
+                return_to_navigator: self.navigator_for_confirm(),
             },
         ));
     }
@@ -1665,6 +1696,7 @@ impl ClientShellState {
                 },
                 title: "Close pane?".to_owned(),
                 detail,
+                return_to_navigator: self.navigator_for_confirm(),
             },
         ));
     }
@@ -1690,6 +1722,7 @@ impl ClientShellState {
                 },
                 title: "Close tab?".to_owned(),
                 detail,
+                return_to_navigator: self.navigator_for_confirm(),
             },
         ));
     }
