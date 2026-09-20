@@ -430,7 +430,7 @@ pub(super) struct ClientNavigatorRow {
     pub(super) target: ClientNavigatorTarget,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct ClientNavigatorOverlay {
     pub(super) query: TextEditor,
     pub(super) search_focused: bool,
@@ -663,6 +663,7 @@ pub(super) struct ClientConfirmCloseOverlay {
     pub(super) target: ClientConfirmCloseTarget,
     pub(super) title: String,
     pub(super) detail: String,
+    pub(super) return_to_navigator: Option<ClientNavigatorOverlay>,
 }
 
 #[derive(Debug)]

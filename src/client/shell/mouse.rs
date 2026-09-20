@@ -1732,7 +1732,12 @@ impl ClientShellState {
                         else {
                             return;
                         };
-                        match confirm.target {
+                        let ClientConfirmCloseOverlay {
+                            target,
+                            return_to_navigator,
+                            ..
+                        } = confirm;
+                        match target {
                             ClientConfirmCloseTarget::Workspace {
                                 endpoint_id,
                                 workspace_id,
@@ -1773,6 +1778,7 @@ impl ClientShellState {
                                 );
                             }
                         }
+                        self.restore_navigator_after_confirm(return_to_navigator);
                         outcome.repaint = true;
                     }
                     _ => {}
@@ -1783,7 +1789,13 @@ impl ClientShellState {
                     outcome.repaint = true;
                 }
             } else {
-                self.overlay = None;
+                // Dismissing a confirm dialog returns to the navigator it
+                // was opened from; every other overlay just closes.
+                let return_to_navigator = match self.overlay.take() {
+                    Some(ClientShellOverlay::ConfirmClose(confirm)) => confirm.return_to_navigator,
+                    _ => None,
+                };
+                self.overlay = return_to_navigator.map(ClientShellOverlay::Navigator);
                 outcome.repaint = true;
             }
             return;
