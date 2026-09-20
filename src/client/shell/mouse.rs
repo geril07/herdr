@@ -1723,7 +1723,14 @@ impl ClientShellState {
                     outcome.repaint = true;
                 }
             } else {
-                self.overlay = None;
+                // Dismissing a confirm dialog returns to the navigator it
+                // was opened from; every other overlay just closes.
+                let return_to_navigator = match self.overlay.take() {
+                    Some(ClientShellOverlay::ConfirmClose(confirm)) => confirm.return_to_navigator,
+                    _ => None,
+                };
+                self.overlay =
+                    return_to_navigator.map(|navigator| ClientShellOverlay::Navigator(*navigator));
                 outcome.repaint = true;
             }
             return;
