@@ -369,7 +369,7 @@ pub(super) struct ClientNavigatorRow {
     pub(super) target: ClientNavigatorTarget,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(super) struct ClientNavigatorOverlay {
     pub(super) query: TextEditor,
     pub(super) search_focused: bool,
@@ -590,6 +590,10 @@ pub(super) struct ClientConfirmCloseOverlay {
     pub(super) pane_target: Option<ClientPaneCloseConfirmation>,
     pub(super) title: String,
     pub(super) detail: String,
+    /// Navigator to reopen when this dialog closes. Boxed to keep
+    /// `ClientShellOverlay` small: it is matched on every render and key event,
+    /// and a full `ClientNavigatorOverlay` inline would dominate the enum.
+    pub(super) return_to_navigator: Option<Box<ClientNavigatorOverlay>>,
 }
 
 #[derive(Debug)]
