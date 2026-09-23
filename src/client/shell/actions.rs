@@ -309,6 +309,15 @@ impl ClientShellState {
     }
 
     pub(super) fn request_selection_copy(&mut self, outcome: &mut ClientShellInput, live: bool) {
+        self.request_selection_copy_with_policy(outcome, live, false);
+    }
+
+    pub(super) fn request_selection_copy_with_policy(
+        &mut self,
+        outcome: &mut ClientShellInput,
+        live: bool,
+        clear_on_success: bool,
+    ) {
         let Some(selection) = self.selection.as_ref() else {
             return;
         };
@@ -322,22 +331,30 @@ impl ClientShellState {
             // between the displayed frame and this request must not reject the copy.
             .filter(|_| !live);
         let (anchor, cursor) = selection.ordered_cells();
+        let anchor = crate::api::schema::PaneTextPoint {
+            row: anchor.0,
+            col: anchor.1,
+        };
+        let cursor = crate::api::schema::PaneTextPoint {
+            row: cursor.0,
+            col: cursor.1,
+        };
         self.push_endpoint_method_with_kind(
             crate::api::schema::Method::PaneSelectionRead(
                 crate::api::schema::PaneSelectionReadParams {
-                    pane_id,
-                    anchor: crate::api::schema::PaneTextPoint {
-                        row: anchor.0,
-                        col: anchor.1,
-                    },
-                    cursor: crate::api::schema::PaneTextPoint {
-                        row: cursor.0,
-                        col: cursor.1,
-                    },
+                    pane_id: pane_id.clone(),
+                    anchor,
+                    cursor,
                     content_revision,
                 },
             ),
-            PendingEndpointKind::SelectionCopy,
+            PendingEndpointKind::SelectionCopy {
+                pane_id,
+                anchor,
+                cursor,
+                clear_on_success,
+                live,
+            },
             outcome,
         );
     }
@@ -680,8 +697,37 @@ impl ClientShellState {
                 let repaint = self.complete_pane_scroll(pane_id, serial, result, &mut outcome);
                 return (repaint, outcome.actions);
             }
-            PendingEndpointKind::SelectionCopy => {
-                return match result {
+            PendingEndpointKind::SelectionCopy {
+                pane_id,
+                anchor,
+                cursor,
+                clear_on_success,
+                live,
+            } => {
+                let clear_selection = clear_on_success
+                    && self.selection.as_ref().is_some_and(|selection| {
+                        selection.pane_id == pane_id
+                            && selection.ordered_cells()
+                                == ((anchor.row, anchor.col), (cursor.row, cursor.col))
+                    });
+                let selection_succeeded = matches!(
+                    &result,
+                    Ok(crate::api::schema::ResponseResult::PaneSelection { .. })
+                );
+                let retry_live = clear_selection
+                    && !live
+                    && matches!(
+                        &result,
+                        Err(error) if error.code.as_deref() == Some("stale_content")
+                    );
+                if retry_live {
+                    // A pane-wide revision can be stale even when the selected cells
+                    // are unchanged. Retry live so auto-copy does not lose the selection.
+                    let mut retry = ClientShellInput::default();
+                    self.request_selection_copy_with_policy(&mut retry, true, true);
+                    return (retry.repaint, retry.actions);
+                }
+                let (mut repaint, actions) = match result {
                     Ok(crate::api::schema::ResponseResult::PaneSelection { text, .. })
                         if !text.is_empty() =>
                     {
@@ -700,13 +746,26 @@ impl ClientShellState {
                     }
                     Err(_) => (true, Vec::new()),
                 };
+                if clear_selection && selection_succeeded {
+                    self.selection = None;
+                    self.stop_selection_autoscroll();
+                    repaint = true;
+                }
+                return (repaint, actions);
             }
             PendingEndpointKind::WordSelection {
                 pane_id,
                 absolute_row,
                 generation,
+                content_revision,
             } => {
-                return self.complete_word_selection_row(pane_id, absolute_row, generation, result);
+                return self.complete_word_selection_row(
+                    pane_id,
+                    absolute_row,
+                    generation,
+                    content_revision,
+                    result,
+                );
             }
             PendingEndpointKind::PaneLinkActivate {
                 pane_id,

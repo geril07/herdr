@@ -78,8 +78,6 @@ fn fast_path_blocker(
         Some("client_surface_patch.fallback.selection")
     } else if state.copy_mode.is_some() {
         Some("client_surface_patch.fallback.copy_mode")
-    } else if state.selection_highlight_clear_deadline.is_some() {
-        Some("client_surface_patch.fallback.selection_deadline")
     } else if patch.panes.iter().any(|pane| {
         !state
             .hits

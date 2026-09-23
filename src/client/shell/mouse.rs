@@ -1813,8 +1813,7 @@ impl ClientShellState {
                 .as_mut()
                 .is_some_and(crate::selection::Selection::finish);
             if copied && self.config.copy_on_select {
-                self.request_selection_copy(outcome, false);
-                self.selection = None;
+                self.request_selection_copy_with_policy(outcome, false, true);
             } else if self
                 .selection
                 .as_ref()
@@ -1985,7 +1984,6 @@ impl ClientShellState {
                     outcome.repaint = true;
                 }
                 self.stop_selection_autoscroll();
-                self.selection_highlight_clear_deadline = None;
                 self.word_selection_gesture = None;
                 let previous_pane_click = self.last_pane_click.take();
                 self.workspace_press = None;

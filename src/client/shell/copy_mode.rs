@@ -68,7 +68,6 @@ impl ClientShellState {
             });
         self.selection = None;
         self.stop_selection_autoscroll();
-        self.selection_highlight_clear_deadline = None;
         self.reset_copy_pipeline();
         let content_revision = self
             .pane_surface
@@ -846,7 +845,6 @@ impl ClientShellState {
             self.request_selection_copy(outcome, false);
         }
         self.selection = None;
-        self.selection_highlight_clear_deadline = None;
         self.push_pane_scroll_offset(
             copy_mode.pane_id,
             copy_mode.entry_offset_from_bottom,

@@ -139,7 +139,6 @@ impl ClientShellState {
         if self.copy_or_terminal_mode() != ClientShellMode::Copy && self.selection.take().is_some()
         {
             self.stop_selection_autoscroll();
-            self.selection_highlight_clear_deadline = None;
             outcome.repaint = true;
         }
         false
@@ -553,7 +552,6 @@ impl ClientShellState {
             self.request_selection_copy(outcome, true);
             self.selection = None;
             self.stop_selection_autoscroll();
-            self.selection_highlight_clear_deadline = None;
             outcome.repaint = true;
             return None;
         }
@@ -562,7 +560,6 @@ impl ClientShellState {
             && self.selection.take().is_some()
         {
             self.stop_selection_autoscroll();
-            self.selection_highlight_clear_deadline = None;
             outcome.repaint = true;
         }
 

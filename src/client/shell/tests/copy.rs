@@ -183,7 +183,10 @@ fn client_mouse_selection_highlights_and_copies_through_endpoint_extraction() {
             row: pane.inner_rect.y,
             modifiers: KeyModifiers::empty(),
         })]);
-    assert!(state.selection.is_none());
+    assert!(state
+        .selection
+        .as_ref()
+        .is_some_and(crate::selection::Selection::is_visible));
     let [ClientShellAction::Endpoint { request, .. }] = &release.actions[..] else {
         panic!("selection release should request endpoint extraction");
     };
@@ -216,6 +219,43 @@ fn client_mouse_selection_highlights_and_copies_through_endpoint_extraction() {
             .map(|feedback| feedback.message.as_str()),
         Some("copied to clipboard")
     );
+    assert!(state.selection.is_none());
+}
+
+#[test]
+fn auto_copy_retries_live_after_stale_content() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut selection =
+        crate::selection::Selection::absolute_range("pane_1".to_owned(), (0, 0), (0, 1));
+    assert!(selection.finish());
+    state.selection = Some(selection);
+    let mut request = ClientShellInput::default();
+    state.request_selection_copy_with_policy(&mut request, false, true);
+    let request_id = request
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            ClientShellAction::Endpoint { request, .. } => Some(request.id.clone()),
+            _ => None,
+        })
+        .expect("selection request");
+    let (_, retry) = state.handle_endpoint_result(
+        "boot-1",
+        &request_id,
+        Err(ClientShellEndpointError {
+            code: Some("stale_content".into()),
+            message: "pane content changed".into(),
+        }),
+    );
+    assert!(retry.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::PaneSelectionRead(params)
+                if params.content_revision.is_none())
+    )));
+    assert!(state.selection.is_some());
 }
 
 #[test]
@@ -241,6 +281,32 @@ fn clipboard_feedback_is_client_local_and_respects_config() {
     assert!(!state.show_copy_feedback(now));
     assert!(state.copy_feedback.is_none());
     assert!(state.copy_feedback_deadline.is_none());
+}
+
+#[test]
+fn copy_on_select_selection_survives_unrelated_output_until_selected_cells_change() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 20).expect("composed frame");
+    let mut selection =
+        crate::selection::Selection::absolute_range("pane_1".to_owned(), (0, 0), (0, 1));
+    assert!(selection.finish());
+    state.selection = Some(selection);
+
+    let mut unrelated = state.pane_surface.as_ref().expect("surface").clone();
+    unrelated.surface_revision += 1;
+    unrelated.panes[0].content_revision += 2;
+    unrelated.frame.cells[4].symbol = "X".into();
+    state.set_pane_surface(unrelated);
+    assert!(state.selection.is_some());
+
+    let mut changed = state.pane_surface.as_ref().expect("surface").clone();
+    changed.surface_revision += 1;
+    changed.panes[0].content_revision += 2;
+    changed.frame.cells[0].symbol = "Y".into();
+    state.set_pane_surface(changed);
+    assert!(state.selection.is_none());
 }
 
 #[test]
@@ -517,6 +583,42 @@ fn keyboard_copy_mode_owns_cursor_selection_copy_and_scroll_restore() {
                     if params.offset_from_bottom == 0
             )
     )));
+}
+
+#[test]
+fn copy_mode_selection_survives_unrelated_output() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 0,
+        max_offset_from_bottom: 20,
+        viewport_rows: 2,
+    });
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let mut enter = ClientShellInput::default();
+    state.record_binding(
+        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CopyMode),
+        &mut enter,
+    );
+    state.handle_input_bytes(b"v");
+    state.handle_input_bytes(b"l");
+    assert!(state
+        .copy_mode
+        .as_ref()
+        .is_some_and(|copy_mode| copy_mode.selection.is_some()));
+
+    let mut updated = state.pane_surface.as_ref().expect("surface").clone();
+    updated.surface_revision += 1;
+    updated.panes[0].content_revision += 2;
+    updated.frame.cells[0].symbol = "X".into();
+    state.set_pane_surface(updated);
+    assert!(state
+        .copy_mode
+        .as_ref()
+        .is_some_and(|copy_mode| copy_mode.selection.is_some()));
+    assert!(state.selection.is_some());
 }
 
 #[test]

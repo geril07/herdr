@@ -340,7 +340,6 @@ fn client_double_click_selects_word_and_copies_only_after_release() {
             assert!(
                 matches!(&copied[..], [ClientShellAction::ClipboardWrite(bytes)] if bytes == b"bravo")
             );
-            assert!(state.tick_copy_feedback(state.selection_highlight_clear_deadline.unwrap()));
             assert!(state.selection.is_none());
         } else {
             assert!(actions.is_empty(), "manual selection must not auto-copy");
@@ -550,7 +549,7 @@ fn double_click_drag_survives_focus_lag_after_anchor_reply() {
 }
 
 #[test]
-fn double_click_drag_invalidates_cached_boundaries_outside_selected_cells() {
+fn double_click_drag_refreshes_cached_row_after_unrelated_output() {
     for copy_on_select in [false, true] {
         let mut state = word_drag_state(copy_on_select);
         let initial = start_word_drag(&mut state);
@@ -560,26 +559,30 @@ fn double_click_drag_invalidates_cached_boundaries_outside_selected_cells() {
         changed.panes[0].content_revision += 2;
         changed.frame.cells[14].symbol = " ".into();
         state.set_pane_surface(changed);
-        assert!(
-            state.selection.is_none(),
-            "unchanged selected cells do not validate cached boundaries outside the selection"
-        );
-        assert!(
-            word_drag_mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 0, 14)
-                .actions
-                .is_empty()
-        );
-        assert!(
-            word_drag_mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 0, 14)
-                .actions
-                .is_empty()
-        );
-        assert!(state.selection.is_none());
+        assert!(state.selection.is_some());
+
+        let motion = word_drag_mouse(&mut state, MouseEventKind::Drag(MouseButton::Left), 1, 8);
+        let row_id = word_read_id(&motion.actions);
+        let refresh = word_row_reply(&mut state, &row_id, "alpha bravo charlie");
+        let row_id = word_read_id(&refresh);
+        word_row_reply(&mut state, &row_id, "delta echo foxtrot");
+        assert!(state.selection.is_some());
+        let release = word_drag_mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 1, 8);
+        if copy_on_select {
+            assert!(release.actions.iter().any(|action| matches!(
+                action,
+                ClientShellAction::Endpoint { request, .. }
+                    if matches!(&request.method, crate::api::schema::Method::PaneSelectionRead(_))
+            )));
+        } else {
+            assert!(release.actions.is_empty());
+        }
+        assert!(state.selection.is_some());
     }
 }
 
 #[test]
-fn reconnect_word_selection_tracks_content_changes() {
+fn reconnect_word_selection_survives_unrelated_content_changes() {
     for content_changed in [false, true] {
         let mut state = word_drag_state(true);
         let initial = start_word_drag(&mut state);
@@ -600,42 +603,52 @@ fn reconnect_word_selection_tracks_content_changes() {
         assert!(state.activate_endpoint_projection(&endpoint_id));
         state.set_pane_surface(next_surface);
 
-        assert_eq!(state.selection.is_some(), !content_changed);
-        assert_eq!(state.word_selection_gesture.is_some(), !content_changed);
+        assert!(state.selection.is_some());
+        assert!(state.word_selection_gesture.is_some());
     }
 }
 
 #[test]
-fn double_click_release_ignores_reply_after_focus_or_content_changes() {
-    for focus_changed in [false, true] {
-        let mut state = word_drag_state(true);
-        let initial = start_word_drag(&mut state);
-        word_drag_mouse(&mut state, MouseEventKind::Up(MouseButton::Left), 0, 8);
-        if focus_changed {
-            let mut lagging = snapshot();
-            lagging.focused_pane_id = None;
-            lagging.panes[0].focused = false;
-            state.set_snapshot(Box::new(lagging));
-            let mut unfocused = snapshot();
-            unfocused.focused_pane_id = Some("pane_2".into());
-            unfocused.panes[0].focused = false;
-            let mut other = unfocused.panes[0].clone();
-            other.pane_id = "pane_2".into();
-            other.focused = true;
-            unfocused.panes.push(other);
-            state.set_snapshot(Box::new(unfocused));
-        } else {
-            let mut changed = state.pane_surface.as_ref().unwrap().clone();
-            changed.surface_revision += 1;
-            changed.panes[0].content_revision += 2;
-            state.set_pane_surface(changed);
-        }
-        assert!(
-            word_row_reply(&mut state, &initial, "alpha bravo charlie").is_empty(),
-            "a stale released gesture must not copy"
-        );
-        assert!(state.selection.is_none());
-    }
+fn double_click_release_ignores_reply_after_focus_change_but_refreshes_after_content_change() {
+    let mut focused = word_drag_state(true);
+    let initial = start_word_drag(&mut focused);
+    word_drag_mouse(&mut focused, MouseEventKind::Up(MouseButton::Left), 0, 8);
+    let mut lagging = snapshot();
+    lagging.focused_pane_id = None;
+    lagging.panes[0].focused = false;
+    focused.set_snapshot(Box::new(lagging));
+    let mut unfocused = snapshot();
+    unfocused.focused_pane_id = Some("pane_2".into());
+    unfocused.panes[0].focused = false;
+    let mut other = unfocused.panes[0].clone();
+    other.pane_id = "pane_2".into();
+    other.focused = true;
+    unfocused.panes.push(other);
+    focused.set_snapshot(Box::new(unfocused));
+    assert!(word_row_reply(&mut focused, &initial, "alpha bravo charlie").is_empty());
+    assert!(focused.selection.is_none());
+
+    let mut updated = word_drag_state(true);
+    let initial = start_word_drag(&mut updated);
+    word_drag_mouse(&mut updated, MouseEventKind::Up(MouseButton::Left), 0, 8);
+    let mut changed = updated.pane_surface.as_ref().unwrap().clone();
+    changed.surface_revision += 1;
+    changed.panes[0].content_revision += 2;
+    updated.set_pane_surface(changed);
+    let retry = updated.handle_endpoint_result(
+        "boot-1",
+        &initial,
+        Err(ClientShellEndpointError {
+            code: Some("stale_content".into()),
+            message: "pane content changed".into(),
+        }),
+    );
+    assert!(retry.1.iter().any(|action| matches!(
+        action,
+        ClientShellAction::Endpoint { request, .. }
+            if matches!(&request.method, crate::api::schema::Method::PaneSelectionRead(_))
+    )));
+    assert!(updated.word_selection_gesture.is_some());
 }
 
 #[test]
@@ -749,9 +762,11 @@ fn pane_content_updates_preserve_active_selection_only_when_selected_cells_stay_
     state.set_pane_surface(replaced_surface);
     assert!(state.selection.is_none());
 
-    for (surface_revision, content_revision, width, alternate_screen_active) in
-        [(4, 6, 4, false), (5, 8, 3, false), (6, 9, 3, false)]
-    {
+    for (surface_revision, content_revision, width, alternate_screen_active, should_clear) in [
+        (4, 6, 4, false, true),
+        (5, 8, 3, false, true),
+        (6, 9, 3, false, false),
+    ] {
         state.selection = Some(crate::selection::Selection::absolute_anchor(
             "pane_1".to_owned(),
             (12, 0),
@@ -761,7 +776,7 @@ fn pane_content_updates_preserve_active_selection_only_when_selected_cells_stay_
         changed_surface.panes[0].inner_rect.width = width;
         changed_surface.panes[0].alternate_screen_active = alternate_screen_active;
         state.set_pane_surface(changed_surface);
-        assert!(state.selection.is_none());
+        assert_eq!(state.selection.is_none(), should_clear);
     }
 }
 

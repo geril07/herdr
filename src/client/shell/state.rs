@@ -31,7 +31,12 @@ fn pane_surface_row<'a>(
         .get(start..start + usize::from(pane.inner_rect.width))
 }
 
-fn selection_cells_unchanged(
+/// Return true only when a selected cell is visibly confirmed to have changed.
+///
+/// A row outside the current surface is unknown, not changed. This keeps a
+/// scrollback selection stable until a later frame proves that its range is
+/// no longer valid.
+fn selection_cells_changed(
     selection: &crate::selection::Selection<String>,
     previous_surface: &PaneSurfaceFrame,
     previous_pane: &crate::protocol::PaneSurfacePane,
@@ -39,7 +44,7 @@ fn selection_cells_unchanged(
     next_pane: &crate::protocol::PaneSurfacePane,
 ) -> bool {
     let ((start_row, start_col), (end_row, end_col)) = selection.ordered_cells();
-    (start_row..=end_row).all(|row| {
+    (start_row..=end_row).any(|row| {
         let first_col = if row == start_row { start_col } else { 0 };
         let last_col = if row == end_row {
             end_col
@@ -57,7 +62,7 @@ fn selection_cells_unchanged(
                 previous
                     .iter()
                     .zip(next)
-                    .all(|(previous, next)| previous.symbol == next.symbol)
+                    .any(|(previous, next)| previous.symbol != next.symbol)
             })
     })
 }
@@ -730,7 +735,13 @@ pub(super) enum PendingEndpointKind {
     WorktreeRemove {
         forced: bool,
     },
-    SelectionCopy,
+    SelectionCopy {
+        pane_id: String,
+        anchor: crate::api::schema::PaneTextPoint,
+        cursor: crate::api::schema::PaneTextPoint,
+        clear_on_success: bool,
+        live: bool,
+    },
     PaneScroll {
         pane_id: String,
         serial: u64,
@@ -739,6 +750,7 @@ pub(super) enum PendingEndpointKind {
         pane_id: String,
         absolute_row: u32,
         generation: u64,
+        content_revision: Option<u64>,
     },
     PaneLinkResolve {
         target: super::link_hover::LinkHoverTarget,
@@ -991,7 +1003,6 @@ pub(crate) struct ClientShellState {
     pub(super) last_pane_click: Option<ClientPaneClick>,
     pub(super) selection_autoscroll: Option<ClientSelectionAutoscroll>,
     pub(super) selection_autoscroll_deadline: Option<std::time::Instant>,
-    pub(super) selection_highlight_clear_deadline: Option<std::time::Instant>,
     pub(super) word_selection_gesture: Option<ClientWordSelection>,
     pub(super) word_selection_generation: u64,
     pub(super) copy_mode: Option<ClientCopyModeState>,
@@ -1157,7 +1168,6 @@ impl ClientShellState {
             last_pane_click: None,
             selection_autoscroll: None,
             selection_autoscroll_deadline: None,
-            selection_highlight_clear_deadline: None,
             word_selection_gesture: None,
             word_selection_generation: 0,
             copy_mode: None,
@@ -1350,7 +1360,6 @@ impl ClientShellState {
         self.last_pane_click = None;
         self.selection_autoscroll = None;
         self.selection_autoscroll_deadline = None;
-        self.selection_highlight_clear_deadline = None;
         self.word_selection_gesture = None;
         self.copy_mode = None;
         if self.mode == ClientShellMode::Copy {
@@ -1534,7 +1543,6 @@ impl ClientShellState {
             self.selection = None;
             self.selection_autoscroll = None;
             self.selection_autoscroll_deadline = None;
-            self.selection_highlight_clear_deadline = None;
             self.word_selection_gesture = None;
             self.last_pane_click = None;
         }
@@ -1558,7 +1566,6 @@ impl ClientShellState {
                 {
                     self.selection = None;
                     self.stop_selection_autoscroll();
-                    self.selection_highlight_clear_deadline = None;
                 }
                 if self.mode == ClientShellMode::Copy {
                     self.mode = ClientShellMode::Terminal;
@@ -1578,7 +1585,6 @@ impl ClientShellState {
                 {
                     self.selection = None;
                     self.stop_selection_autoscroll();
-                    self.selection_highlight_clear_deadline = None;
                 }
                 if self.mode == ClientShellMode::Copy {
                     self.mode = ClientShellMode::Terminal;
@@ -1765,7 +1771,6 @@ impl ClientShellState {
             self.last_pane_click = None;
             self.selection_autoscroll = None;
             self.selection_autoscroll_deadline = None;
-            self.selection_highlight_clear_deadline = None;
             self.word_selection_gesture = None;
             self.copy_mode = None;
             self.reset_copy_pipeline();
@@ -1789,6 +1794,7 @@ impl ClientShellState {
             Some(gesture) => Some(&gesture.pane_id),
             None => self.selection.as_ref().map(|selection| &selection.pane_id),
         };
+        let selection_pane_id = selection_pane.cloned();
         let selection_content_changed = selection_pane.is_some_and(|pane_id| {
             let Some(previous_surface) = self.pane_surface.as_ref() else {
                 return false;
@@ -1811,28 +1817,46 @@ impl ClientShellState {
                 return false;
             }
             match (&self.word_selection_gesture, &self.selection) {
-                // Word gestures cache boundaries outside the selected cells too.
-                (Some(_), _) => true,
-                (None, Some(selection)) => {
-                    self.config.copy_on_select
-                        && (!previous.content_revision.is_multiple_of(2)
-                            || !next.content_revision.is_multiple_of(2)
-                            || !selection_cells_unchanged(
-                                selection,
-                                previous_surface,
-                                previous,
-                                &surface,
-                                next,
-                            ))
+                // A revision only says that the pane changed. Keep the gesture when
+                // the selected cells are unchanged or cannot be checked in this frame.
+                (Some(_), Some(selection)) | (None, Some(selection)) => {
+                    previous.content_revision.is_multiple_of(2)
+                        && next.content_revision.is_multiple_of(2)
+                        && selection_cells_changed(
+                            selection,
+                            previous_surface,
+                            previous,
+                            &surface,
+                            next,
+                        )
                 }
-                (None, None) => false,
+                (Some(_), None) | (None, None) => false,
             }
         });
+        let word_content_revision = if selection_content_changed {
+            None
+        } else {
+            self.word_selection_gesture.as_ref().and_then(|gesture| {
+                let previous_surface = self.pane_surface.as_ref()?;
+                let previous = previous_surface
+                    .panes
+                    .iter()
+                    .find(|pane| pane.pane_id == gesture.pane_id)?;
+                let next = surface
+                    .panes
+                    .iter()
+                    .find(|pane| pane.pane_id == gesture.pane_id)?;
+                (previous.content_revision != next.content_revision)
+                    .then_some(next.content_revision)
+            })
+        };
+        if let Some(content_revision) = word_content_revision {
+            self.observe_word_selection_content_revision(content_revision);
+        }
         if selection_content_changed {
             self.word_selection_gesture = None;
             self.selection = None;
             self.stop_selection_autoscroll();
-            self.selection_highlight_clear_deadline = None;
         }
         for pane in &surface.panes {
             let Some(target) = self.pane_scroll_targets.get(&pane.pane_id).copied() else {
@@ -1847,6 +1871,12 @@ impl ClientShellState {
                 self.pane_scroll_targets.remove(&pane.pane_id);
             }
         }
+        let copy_selection_invalidated = selection_content_changed
+            && selection_pane_id.as_deref().is_some_and(|pane_id| {
+                self.copy_mode.as_ref().is_some_and(|copy_mode| {
+                    copy_mode.pane_id == pane_id && copy_mode.selection.is_some()
+                })
+            });
         let mut invalidated_copy_pane = None;
         if let Some(copy_mode) = self.copy_mode.as_mut() {
             if let Some(pane) = surface
@@ -1855,19 +1885,21 @@ impl ClientShellState {
                 .find(|pane| pane.pane_id == copy_mode.pane_id)
             {
                 let geometry = (pane.inner_rect.width, pane.inner_rect.height);
-                if copy_mode.content_revision != pane.content_revision
-                    || copy_mode.geometry != geometry
-                {
+                let content_changed = copy_mode.content_revision != pane.content_revision;
+                let geometry_changed = copy_mode.geometry != geometry;
+                if content_changed || geometry_changed {
                     copy_mode.content_revision = pane.content_revision;
                     copy_mode.geometry = geometry;
-                    copy_mode.selection = None;
+                    if geometry_changed || copy_selection_invalidated {
+                        copy_mode.selection = None;
+                        invalidated_copy_pane = Some(copy_mode.pane_id.clone());
+                    }
                     copy_mode.search_matches.clear();
                     copy_mode.search_total = 0;
                     copy_mode.search_current = None;
                     copy_mode.search_current_global = None;
                     copy_mode.search_generation = copy_mode.search_generation.saturating_add(1);
                     copy_mode.copy_after_search = false;
-                    invalidated_copy_pane = Some(copy_mode.pane_id.clone());
                 }
                 if let Some(scroll) = pane.scroll {
                     let actual_offset =
@@ -1887,7 +1919,6 @@ impl ClientShellState {
         }) {
             self.selection = None;
             self.stop_selection_autoscroll();
-            self.selection_highlight_clear_deadline = None;
         }
         self.popup_terminal_id = next_popup;
         self.graphics
@@ -1928,14 +1959,6 @@ impl ClientShellState {
         {
             self.copy_feedback = None;
             self.copy_feedback_deadline = None;
-            repaint = true;
-        }
-        if self
-            .selection_highlight_clear_deadline
-            .is_some_and(|deadline| now >= deadline)
-        {
-            self.selection = None;
-            self.selection_highlight_clear_deadline = None;
             repaint = true;
         }
         repaint

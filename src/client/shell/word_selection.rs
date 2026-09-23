@@ -18,6 +18,17 @@ pub(super) struct ClientWordSelection {
 }
 
 impl ClientShellState {
+    pub(super) fn observe_word_selection_content_revision(&mut self, content_revision: u64) {
+        let Some(gesture) = self.word_selection_gesture.as_mut() else {
+            return;
+        };
+        if content_revision.is_multiple_of(2) {
+            gesture.content_revision = Some(content_revision);
+            gesture.anchor_bounds = None;
+            gesture.cached_row = None;
+        }
+    }
+
     pub(super) fn request_word_selection(
         &mut self,
         hit: &PaneHit,
@@ -68,6 +79,7 @@ impl ClientShellState {
         }
         gesture.pending_row = Some(row);
         let pane_id = gesture.pane_id.clone();
+        let content_revision = gesture.content_revision;
         let params = crate::api::schema::PaneSelectionReadParams {
             pane_id: pane_id.clone(),
             anchor: crate::api::schema::PaneTextPoint { row, col: 0 },
@@ -75,7 +87,7 @@ impl ClientShellState {
                 row,
                 col: gesture.end_col,
             },
-            content_revision: gesture.content_revision,
+            content_revision,
         };
         if !self.push_endpoint_method_with_kind(
             crate::api::schema::Method::PaneSelectionRead(params),
@@ -83,6 +95,7 @@ impl ClientShellState {
                 pane_id,
                 absolute_row: row,
                 generation: self.word_selection_generation,
+                content_revision,
             },
             outcome,
         ) {
@@ -120,6 +133,9 @@ impl ClientShellState {
             return;
         };
         let Some((anchor_start, anchor_end)) = gesture.anchor_bounds else {
+            if gesture.pending_row.is_none() {
+                self.request_word_selection_row(gesture.anchor.0, outcome);
+            }
             return;
         };
         let Some((_, text)) = gesture
@@ -141,19 +157,12 @@ impl ClientShellState {
             end,
         ));
         if gesture.released {
-            let dragged = gesture.dragged;
             if let Some(selection) = self.selection.as_mut() {
                 selection.finish();
             }
             self.word_selection_gesture = None;
             if self.config.copy_on_select {
-                self.request_selection_copy(outcome, false);
-                if dragged {
-                    self.selection = None;
-                } else {
-                    self.selection_highlight_clear_deadline =
-                        Some(std::time::Instant::now() + std::time::Duration::from_millis(500));
-                }
+                self.request_selection_copy_with_policy(outcome, false, true);
             }
         }
         outcome.repaint = true;
@@ -164,6 +173,7 @@ impl ClientShellState {
         pane_id: String,
         absolute_row: u32,
         generation: u64,
+        content_revision: Option<u64>,
         result: Result<crate::api::schema::ResponseResult, ClientShellEndpointError>,
     ) -> (bool, Vec<ClientShellAction>) {
         if self.word_selection_generation != generation
@@ -181,11 +191,30 @@ impl ClientShellState {
             self.cancel_word_selection();
             return (true, Vec::new());
         }
+        if self
+            .word_selection_gesture
+            .as_ref()
+            .is_some_and(|gesture| gesture.content_revision != content_revision)
+        {
+            let mut outcome = ClientShellInput::default();
+            if let Some(gesture) = self.word_selection_gesture.as_mut() {
+                gesture.pending_row = None;
+            }
+            self.request_word_selection_row(absolute_row, &mut outcome);
+            return (outcome.repaint, outcome.actions);
+        }
         let text = match result {
             Ok(crate::api::schema::ResponseResult::PaneSelection {
                 pane_id: returned_pane_id,
                 text,
             }) if returned_pane_id == pane_id => text,
+            Err(error) if error.code.as_deref() == Some("stale_content") => {
+                if let Some(gesture) = self.word_selection_gesture.as_mut() {
+                    gesture.pending_row = None;
+                    gesture.cached_row = None;
+                }
+                return (false, Vec::new());
+            }
             other => {
                 if matches!(other, Ok(value) if !matches!(value, crate::api::schema::ResponseResult::PaneSelection { .. }))
                 {
