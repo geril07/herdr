@@ -191,12 +191,24 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
+        let collapsed_workspaces = if self.config.navigator_start_expanded {
+            std::collections::HashSet::new()
+        } else {
+            super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
+                .flat_map(|endpoint| {
+                    endpoint.snapshot.workspaces.iter().map(move |workspace| {
+                        (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
+                    })
+                })
+                .collect()
+        };
         let mut navigator = ClientNavigatorOverlay {
             query: TextEditor::default(),
-            search_focused: false,
+            search_focused: self.config.navigator_start_search_focused,
             selected: None,
             scroll: 0,
             filter: None,
+            collapsed_workspaces,
         };
         let rows =
             render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, &navigator);
@@ -313,6 +325,39 @@ impl ClientShellState {
             self.overlay = None;
         }
         outcome.repaint = true;
+    }
+
+    /// Flip the collapse state of the selected workspace row. The workspace row
+    /// stays visible either way, so the selection and scroll are left alone and
+    /// the highlight never jumps to the top of the list.
+    pub(super) fn toggle_selected_navigator_workspace(&mut self) {
+        let Some(workspace) = self.overlay.as_ref().and_then(|overlay| match overlay {
+            ClientShellOverlay::Navigator(navigator) => {
+                let rows = render::client_navigator_rows(
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    navigator,
+                );
+                super::aggregate_navigation::selected_navigator_target(&rows, navigator).and_then(
+                    |target| match target {
+                        ClientNavigatorTarget::Workspace {
+                            endpoint_id,
+                            workspace_id,
+                        } => Some((endpoint_id, workspace_id)),
+                        _ => None,
+                    },
+                )
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() else {
+            return;
+        };
+        if !navigator.collapsed_workspaces.remove(&workspace) {
+            navigator.collapsed_workspaces.insert(workspace);
+        }
     }
 
     pub(super) fn workspace_action_id(&self) -> Option<String> {
@@ -785,6 +830,11 @@ impl ClientShellState {
                     navigator.filter = None;
                     navigator.selected = None;
                 }
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char(' ') && modifiers.is_empty() {
+                self.toggle_selected_navigator_workspace();
                 outcome.repaint = true;
                 return;
             }

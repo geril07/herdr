@@ -47,6 +47,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) keybinding_source: ClientShellKeybindingSource,
     pub(super) prompt_new_tab_name: bool,
     pub(super) prompt_new_workspace_name: bool,
+    pub(super) navigator_start_expanded: bool,
+    pub(super) navigator_start_search_focused: bool,
     pub(super) confirm_close: bool,
     pub(super) confirm_pane_close: bool,
     pub(super) mouse_capture: bool,
@@ -376,6 +378,9 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) selected: Option<ClientNavigatorTarget>,
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
+    /// Workspaces whose panes are hidden. A workspace is collapsed when its key
+    /// is present, so a new or renamed workspace is expanded until collapsed.
+    pub(super) collapsed_workspaces: std::collections::HashSet<(ClientEndpointId, String)>,
 }
 
 #[derive(Debug)]

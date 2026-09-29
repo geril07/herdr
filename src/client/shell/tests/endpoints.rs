@@ -2591,3 +2591,212 @@ fn navigator_foreign_workspace_heading_keeps_the_workspace_target() {
         }] if activated == &endpoint_id && workspace_id == "ws_1"
     ));
 }
+
+fn navigator_multi_workspace_state(start_expanded: bool) -> ClientShellState {
+    let mut config = Config::default();
+    config.ui.navigator_start_expanded = start_expanded;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut projected = snapshot();
+    projected.workspaces = (1..=2)
+        .map(|number| {
+            let mut workspace = projected.workspaces[0].clone();
+            workspace.workspace_id = format!("ws_{number}");
+            workspace.label = format!("space-{number}");
+            workspace.number = number;
+            workspace.focused = number == 1;
+            workspace
+        })
+        .collect();
+    // Give each workspace its own tab and pane so both can be observed.
+    let base_tab = projected.tabs[0].clone();
+    let base_pane = projected.panes[0].clone();
+    projected.tabs = (1..=2)
+        .map(|number| {
+            let mut tab = base_tab.clone();
+            tab.tab_id = format!("tab_{number}");
+            tab.workspace_id = format!("ws_{number}");
+            tab.number = number;
+            tab.label = number.to_string();
+            tab.focused = number == 1;
+            tab
+        })
+        .collect();
+    projected.panes = (1..=2)
+        .map(|number| {
+            let mut pane = base_pane.clone();
+            pane.pane_id = format!("pane_{number}");
+            pane.workspace_id = format!("ws_{number}");
+            pane.tab_id = format!("tab_{number}");
+            pane.label = Some(format!("term-{number}"));
+            pane.focused = number == 1;
+            pane
+        })
+        .collect();
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state
+}
+
+fn navigator_workspace_keys(state: &ClientShellState) -> Vec<String> {
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should be open");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    rows.iter()
+        .filter_map(|row| match &row.target {
+            ClientNavigatorTarget::Workspace { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn navigator_pane_keys(state: &ClientShellState) -> Vec<String> {
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should be open");
+    };
+    let rows =
+        render::client_navigator_rows(&state.endpoints, &state.active_endpoint_id, navigator);
+    rows.iter()
+        .filter_map(|row| match &row.target {
+            ClientNavigatorTarget::Pane { pane_id, .. } => Some(pane_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn press_navigator_key(state: &mut ClientShellState, code: KeyCode) -> ClientShellInput {
+    state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+        code,
+        KeyModifiers::empty(),
+    ))])
+}
+
+fn select_navigator_workspace(state: &mut ClientShellState, workspace_id: &str) {
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: workspace_id.to_owned(),
+        });
+    }
+}
+
+#[test]
+fn navigator_start_expanded_shows_every_pane() {
+    let mut state = navigator_multi_workspace_state(true);
+    state.open_navigator_overlay();
+    assert_eq!(navigator_workspace_keys(&state), vec!["ws_1", "ws_2"]);
+    assert_eq!(navigator_pane_keys(&state), vec!["pane_1", "pane_2"]);
+}
+
+#[test]
+fn navigator_start_collapsed_hides_panes_behind_workspace_rows() {
+    let mut state = navigator_multi_workspace_state(false);
+    state.open_navigator_overlay();
+    assert_eq!(navigator_workspace_keys(&state), vec!["ws_1", "ws_2"]);
+    assert!(
+        navigator_pane_keys(&state).is_empty(),
+        "a collapsed workspace must not list its panes"
+    );
+}
+
+#[test]
+fn space_toggles_the_selected_workspace_collapse() {
+    let mut state = navigator_multi_workspace_state(false);
+    state.open_navigator_overlay();
+    select_navigator_workspace(&mut state, "ws_1");
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    assert_eq!(
+        navigator_pane_keys(&state),
+        vec!["pane_1"],
+        "expanding ws_1 should reveal only its own pane"
+    );
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    assert!(navigator_pane_keys(&state).is_empty());
+}
+
+#[test]
+fn collapsing_keeps_the_selection_on_the_workspace_row() {
+    let mut state = navigator_multi_workspace_state(false);
+    state.open_navigator_overlay();
+    select_navigator_workspace(&mut state, "ws_2");
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should stay open");
+    };
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: "ws_2".into(),
+        }),
+        "toggling must not drop the highlight to the top of the list"
+    );
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_ref() else {
+        panic!("navigator should stay open");
+    };
+    assert_eq!(
+        navigator.selected,
+        Some(ClientNavigatorTarget::Workspace {
+            endpoint_id: state.active_endpoint_id.clone(),
+            workspace_id: "ws_2".into(),
+        }),
+        "expanding again must keep the selection too"
+    );
+}
+
+#[test]
+fn navigator_search_cannot_match_a_pane_hidden_by_collapse() {
+    let mut state = navigator_multi_workspace_state(false);
+    state.open_navigator_overlay();
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        // The workspace label matches, but its pane is hidden.
+        navigator.query = "space-1".into();
+    }
+    assert_eq!(navigator_workspace_keys(&state), vec!["ws_1"]);
+    assert!(
+        navigator_pane_keys(&state).is_empty(),
+        "a collapsed workspace's pane must not be reachable by search"
+    );
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.query = "term-1".into();
+    }
+    assert!(
+        navigator_workspace_keys(&state).is_empty(),
+        "a query naming only a hidden pane matches nothing"
+    );
+    assert!(navigator_pane_keys(&state).is_empty());
+}
+
+#[test]
+fn expanding_a_workspace_makes_its_pane_searchable_again() {
+    let mut state = navigator_multi_workspace_state(false);
+    state.open_navigator_overlay();
+    select_navigator_workspace(&mut state, "ws_1");
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.query = "term-1".into();
+    }
+    assert_eq!(navigator_pane_keys(&state), vec!["pane_1"]);
+}
+
+#[test]
+fn space_on_a_pane_row_does_not_toggle_anything() {
+    let mut state = navigator_multi_workspace_state(false);
+    state.open_navigator_overlay();
+    select_navigator_workspace(&mut state, "ws_1");
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    if let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() {
+        navigator.selected = Some(ClientNavigatorTarget::Pane {
+            endpoint_id: state.active_endpoint_id.clone(),
+            pane_id: "pane_1".into(),
+        });
+    }
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    assert_eq!(
+        navigator_pane_keys(&state),
+        vec!["pane_1"],
+        "space on a pane row must not collapse its workspace"
+    );
+}

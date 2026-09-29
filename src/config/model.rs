@@ -993,6 +993,11 @@ pub struct UiConfig {
     pub prompt_new_tab_name: bool,
     /// Ask for a workspace name before interactive creation. Default: false.
     pub prompt_new_workspace_name: bool,
+    /// Open the session navigator with every workspace expanded, showing its
+    /// panes. Set false to start collapsed on workspace rows only. Default: true.
+    pub navigator_start_expanded: bool,
+    /// Open the session navigator with the search field focused. Default: false.
+    pub navigator_start_search_focused: bool,
     /// Draw borders around split panes. auto draws them only for split panes,
     /// always also frames a lone pane (only while pane_outer_borders is
     /// enabled, since every edge of a lone pane is an outer edge), off
@@ -1252,6 +1257,8 @@ impl Default for UiConfig {
             confirm_pane_close: true,
             prompt_new_tab_name: true,
             prompt_new_workspace_name: false,
+            navigator_start_expanded: true,
+            navigator_start_search_focused: false,
             pane_borders: PaneBordersConfig::Auto,
             pane_outer_borders: true,
             pane_scrollbars: true,
@@ -1680,6 +1687,24 @@ confirm_pane_close = false
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.ui.confirm_pane_close);
+    }
+
+    #[test]
+    fn navigator_start_defaults_and_parses() {
+        let default_config = Config::default();
+        assert!(default_config.ui.navigator_start_expanded);
+        assert!(!default_config.ui.navigator_start_search_focused);
+
+        let config: Config = toml::from_str(
+            r#"
+[ui]
+navigator_start_expanded = false
+navigator_start_search_focused = true
+"#,
+        )
+        .unwrap();
+        assert!(!config.ui.navigator_start_expanded);
+        assert!(config.ui.navigator_start_search_focused);
     }
 
     #[test]
