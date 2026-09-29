@@ -227,6 +227,58 @@ fn navigation_highlights_only_the_preview_and_activates_on_enter() {
 }
 
 #[test]
+fn configured_open_alias_activates_the_selected_workspace() {
+    let (mut state, _) = navigation_state(workspaces(2));
+    state.config.keybinds.keybinds.navigate.workspace_open =
+        crate::config::ActionKeybinds::direct("o");
+    state.compose(100, 28).unwrap();
+    enter_navigation(&mut state);
+    preview_key(&mut state, b"\x1b[B");
+
+    let open = state.handle_input_bytes(b"o");
+    assert!(
+        matches!(open.actions.as_slice(), [ClientShellAction::ActivateEndpoint {
+            endpoint_id: ClientEndpointId::Local,
+            target: Some(ClientEndpointFocusTarget::Workspace(id)),
+        }] if id == "ws_2"),
+        "actions: {:?}",
+        open.actions
+    );
+    assert_eq!(state.mode, ClientShellMode::Terminal);
+    assert!(state.navigate_workspace_id.is_none());
+}
+
+#[test]
+fn navigate_mode_does_not_run_custom_commands() {
+    let (mut state, _) = navigation_state(workspaces(2));
+    state.config.keybinds.keybinds.open_notification_target = Default::default();
+    state
+        .config
+        .keybinds
+        .keybinds
+        .custom_commands
+        .push(crate::config::CustomCommandKeybind {
+            bindings: crate::config::ActionKeybinds::prefix("o"),
+            label: "prefix+o".into(),
+            command: "agent-overview".into(),
+            action: crate::config::CustomCommandAction::Popup,
+            description: None,
+            width: None,
+            height: None,
+        });
+    state.compose(100, 28).unwrap();
+    enter_navigation(&mut state);
+    preview_key(&mut state, b"\x1b[B");
+    let selected = state.navigate_workspace_id.clone();
+
+    let open = state.handle_input_bytes(b"o");
+    assert!(open.actions.is_empty());
+    assert!(open.requests.is_empty());
+    assert_eq!(state.mode, ClientShellMode::Navigate);
+    assert_eq!(state.navigate_workspace_id, selected);
+}
+
+#[test]
 fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
     let (mut state, remote) = state_with_remote();
     state.compose(100, 28).unwrap();

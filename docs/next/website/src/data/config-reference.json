@@ -566,6 +566,12 @@
           "description": "Move workspace selection down in navigate mode."
         },
         {
+          "key": "keys.navigate_workspace_open",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Additional key to open the selected workspace in navigate mode. Enter always works."
+        },
+        {
           "key": "keys.navigate_pane_left",
           "type": "keybinding",
           "default": "\"h\"",
