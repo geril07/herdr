@@ -1151,6 +1151,28 @@ fn render_agent_picker_overlay(
         .min(selected)
         .min(max);
     let mut row_hits = Vec::new();
+    // Table columns: status | workspace_tab | agent_label | elapsed.
+    // Widths come from all filtered rows so columns do not jump while scrolling.
+    // Workspace caps at 36, agent caps at 12; elapsed keeps a fixed column.
+    let ws_cap: u16 = 36;
+    let ws_max = rows
+        .iter()
+        .map(|r| display_width(&r.workspace_tab))
+        .max()
+        .unwrap_or(0)
+        .min(ws_cap);
+    let agent_cap: u16 = 12;
+    let agent_col = rows
+        .iter()
+        .map(|r| display_width(&r.agent_label))
+        .max()
+        .unwrap_or(0)
+        .min(agent_cap);
+    let elapsed_max = rows
+        .iter()
+        .filter_map(|r| r.status_elapsed.as_ref().map(|e| display_width(e)))
+        .max()
+        .unwrap_or(0);
     for (ix, r) in rows.iter().enumerate().take(scroll + body.height as usize) {
         if ix < scroll {
             continue;
@@ -1183,21 +1205,25 @@ fn render_agent_picker_overlay(
         let status = status_icon(r.status, indicators);
         // Workspace first, then the agent name, so the column reads as
         // "where · what" and the agent labels line up at a fixed offset.
-        let elapsed_suffix = match &r.status_elapsed {
-            Some(elapsed) => format!(" · {elapsed}"),
-            None => String::new(),
-        };
-        let ws_width = display_width(&r.workspace_tab);
-        let ws_col = 16u16;
-        let spacing = if ws_width < ws_col {
-            " ".repeat((ws_col - ws_width + 2) as usize)
-        } else {
-            "  ".to_string()
-        };
-        let label = format!(
-            " {current}{status} {}{spacing}{}{elapsed_suffix}",
-            r.workspace_tab, r.agent_label
+        let ws_shown = crate::ui::truncate_end(&r.workspace_tab, ws_max as usize);
+        let ws_padded = format!(
+            "{ws_shown}{}",
+            " ".repeat(ws_max.saturating_sub(display_width(&ws_shown)) as usize)
         );
+        // 1 leading + 2 current + 1 status + 1 space.
+        let agent_shown = crate::ui::truncate_end(&r.agent_label, agent_col as usize);
+        let agent_padded = format!(
+            "{agent_shown}{}",
+            " ".repeat(agent_col.saturating_sub(display_width(&agent_shown)) as usize)
+        );
+        let elapsed_suffix = if elapsed_max > 0 {
+            let elapsed = r.status_elapsed.as_deref().unwrap_or("");
+            let pad = elapsed_max.saturating_sub(display_width(elapsed)) as usize;
+            format!("  {}{elapsed}", " ".repeat(pad))
+        } else {
+            String::new()
+        };
+        let label = format!(" {current}{status} {ws_padded}  {agent_padded}{elapsed_suffix}");
         put_text(b, rect.x, rect.y, rect.width, &label, st);
 
         if !r.stale && ix != selected {

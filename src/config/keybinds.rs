@@ -1612,6 +1612,30 @@ mod tests {
     }
 
     #[test]
+    fn agent_picker_defaults_to_prefix_shift_a() {
+        let kb = Config::default().keybinds();
+        assert_eq!(
+            binding_triggers(&kb.agent_picker),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('a'),
+                KeyModifiers::SHIFT
+            ))]
+        );
+    }
+
+    #[test]
+    fn agent_navigation_defaults_to_prefix_a() {
+        let kb = Config::default().keybinds();
+        assert_eq!(
+            binding_triggers(&kb.agent_navigation),
+            vec![BindingTrigger::Prefix((
+                KeyCode::Char('a'),
+                KeyModifiers::empty()
+            ))]
+        );
+    }
+
+    #[test]
     fn parse_simple_char_combo() {
         assert_eq!(
             parse_key_combo("v"),
