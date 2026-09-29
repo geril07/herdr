@@ -59,6 +59,7 @@ pub(crate) fn render_collapsed_sidebar(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
+    collapsed_groups: &HashSet<String>,
     selected_workspace_id: Option<&str>,
     selected_agent_pane_id: Option<&str>,
     hits: &mut ShellHitMap,
@@ -69,15 +70,20 @@ pub(crate) fn render_collapsed_sidebar(
     let active_background = workspace_active_background(palette, selected_workspace_id.is_some());
     render_sidebar_background(buffer, area, palette, on_right);
     let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area, on_right);
-    for (index, workspace) in snapshot
-        .workspaces
+    // The compact rail draws the same grouped order as the expanded sidebar so
+    // row numbers and digit shortcuts address the same workspace.
+    let entries = workspace_entries(snapshot, collapsed_groups);
+    for (position, entry) in entries
         .iter()
         .take(workspace_area.height as usize)
         .enumerate()
     {
+        let Some(workspace) = snapshot.workspaces.get(entry.index) else {
+            continue;
+        };
         let rect = Rect::new(
             workspace_area.x,
-            workspace_area.y + index as u16,
+            workspace_area.y + position as u16,
             workspace_area.width,
             1,
         );
@@ -96,15 +102,20 @@ pub(crate) fn render_collapsed_sidebar(
         } else {
             Style::default().fg(palette.overlay0)
         };
+        let number_style = if entry.indented {
+            number_style.add_modifier(Modifier::DIM)
+        } else {
+            number_style
+        };
         put_text(
             buffer,
             rect.x,
             rect.y,
             rect.width.min(2),
-            &format!("{:<2}", index + 1),
+            &format!("{:<2}", position + 1),
             number_style,
         );
-        let status = workspace.agent_status;
+        let status = displayed_workspace_status(snapshot, workspace, collapsed_groups);
         put_text(
             buffer,
             rect.x.saturating_add(2),
@@ -117,7 +128,7 @@ pub(crate) fn render_collapsed_sidebar(
             rect,
             endpoint_id: ClientEndpointId::Local,
             workspace_id: workspace.workspace_id.clone(),
-            indented: false,
+            indented: entry.indented,
             group_toggle: None,
         });
     }
