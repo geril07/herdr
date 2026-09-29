@@ -669,13 +669,13 @@ impl ClientShellState {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
         if self.mode == ClientShellMode::Navigate
-            && self.navigation_preview_action_blocked()
+            && self.workspace_preview_action_blocked()
             && self.overlay.is_none()
             && !self.mobile_layout_active()
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
         {
             self.mode = self.copy_or_terminal_mode();
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
             outcome.repaint = true;
         }
         if mouse.kind == MouseEventKind::Down(MouseButton::Left)
@@ -1053,6 +1053,22 @@ impl ClientShellState {
                     }
                     return;
                 }
+                Some(ClientChromeDrag::NavigatorScrollbar { grab_row_offset }) => {
+                    if let Some(metrics) = self.hits.navigator_scroll_metrics {
+                        let offset = crate::ui::scrollbar_offset_from_drag_row(
+                            metrics,
+                            self.hits.navigator_scrollbar,
+                            mouse.row,
+                            *grab_row_offset,
+                        );
+                        self.scroll_navigator_to(
+                            metrics.max_offset_from_bottom.saturating_sub(offset),
+                            metrics.viewport_rows,
+                        );
+                        outcome.repaint = true;
+                    }
+                    return;
+                }
                 Some(ClientChromeDrag::HelpScrollbar { grab_row_offset }) => {
                     if let (Some(metrics), Some(ClientShellOverlay::Help(help))) =
                         (self.hits.help_scroll_metrics, self.overlay.as_mut())
@@ -1338,6 +1354,7 @@ impl ClientShellState {
                     ClientChromeDrag::WorkspaceScrollbar { .. }
                     | ClientChromeDrag::AgentScrollbar { .. }
                     | ClientChromeDrag::HelpScrollbar { .. }
+                    | ClientChromeDrag::NavigatorScrollbar { .. }
                     | ClientChromeDrag::ProductAnnouncementScrollbar { .. }
                     | ClientChromeDrag::ReleaseNotesScrollbar { .. } => {}
                 }
@@ -1634,7 +1651,29 @@ impl ClientShellState {
                     }
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
-                    if super::contains(self.hits.navigator_search, point) {
+                    if super::contains(self.hits.navigator_scrollbar, point) {
+                        if let Some(metrics) = self.hits.navigator_scroll_metrics {
+                            if let Some(grab_row_offset) = crate::ui::scrollbar_thumb_grab_offset(
+                                metrics,
+                                self.hits.navigator_scrollbar,
+                                mouse.row,
+                            ) {
+                                self.chrome_drag =
+                                    Some(ClientChromeDrag::NavigatorScrollbar { grab_row_offset });
+                            } else {
+                                let offset = crate::ui::scrollbar_offset_from_row(
+                                    metrics,
+                                    self.hits.navigator_scrollbar,
+                                    mouse.row,
+                                );
+                                self.scroll_navigator_to(
+                                    metrics.max_offset_from_bottom.saturating_sub(offset),
+                                    metrics.viewport_rows,
+                                );
+                                outcome.repaint = true;
+                            }
+                        }
+                    } else if super::contains(self.hits.navigator_search, point) {
                         if let Some(ClientShellOverlay::Navigator(navigator)) =
                             self.overlay.as_mut()
                         {
@@ -1642,19 +1681,13 @@ impl ClientShellState {
                             navigator.filter = None;
                         }
                         outcome.repaint = true;
-                    } else if let Some((rect, target)) = row_hit {
+                    } else if let Some((_, target)) = row_hit {
                         if let Some(ClientShellOverlay::Navigator(navigator)) =
                             self.overlay.as_mut()
                         {
-                            navigator.selected = Some(target.clone());
+                            navigator.selected = Some(target);
                         }
-                        let workspace = matches!(target, ClientNavigatorTarget::Workspace { .. });
-                        if workspace && mouse.column <= rect.x.saturating_add(3) {
-                            self.toggle_selected_navigator_workspace();
-                            outcome.repaint = true;
-                        } else {
-                            self.accept_navigator_selection(outcome);
-                        }
+                        self.accept_navigator_selection(outcome);
                     } else if !super::contains(self.hits.navigator_popup, point) {
                         self.overlay = None;
                         outcome.repaint = true;
@@ -1672,54 +1705,6 @@ impl ClientShellState {
             }
             return;
         }
-        if matches!(self.overlay, Some(ClientShellOverlay::AgentPicker(_))) {
-            let row_hit = self
-                .hits
-                .agent_picker_rows
-                .iter()
-                .find(|(rect, _, _)| super::contains(*rect, point))
-                .cloned();
-            match mouse.kind {
-                MouseEventKind::Moved => {
-                    if let Some((_, endpoint_id, pane_id)) = row_hit {
-                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
-                        {
-                            picker.selected = Some((endpoint_id, pane_id));
-                        }
-                        outcome.repaint = true;
-                    }
-                }
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if super::contains(self.hits.agent_picker_search, point) {
-                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
-                        {
-                            picker.search_focused = true;
-                            picker.filter = None;
-                        }
-                        outcome.repaint = true;
-                    } else if let Some((_, endpoint_id, pane_id)) = row_hit {
-                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
-                        {
-                            picker.selected = Some((endpoint_id, pane_id));
-                        }
-                        self.accept_agent_picker_selection(outcome);
-                    } else if !super::contains(self.hits.agent_picker_popup, point) {
-                        self.overlay = None;
-                        outcome.repaint = true;
-                    }
-                }
-                MouseEventKind::ScrollUp => {
-                    self.move_agent_picker_selection(-3);
-                    outcome.repaint = true;
-                }
-                MouseEventKind::ScrollDown => {
-                    self.move_agent_picker_selection(3);
-                    outcome.repaint = true;
-                }
-                _ => {}
-            }
-            return;
-        }
         if self.overlay.is_some() {
             if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
                 return;
@@ -1728,58 +1713,7 @@ impl ClientShellState {
                 match self.overlay.as_ref() {
                     Some(ClientShellOverlay::Rename(_)) => self.save_rename_overlay(outcome),
                     Some(ClientShellOverlay::ConfirmClose(_)) => {
-                        let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take()
-                        else {
-                            return;
-                        };
-                        let ClientConfirmCloseOverlay {
-                            target,
-                            return_to_navigator,
-                            ..
-                        } = confirm;
-                        match target {
-                            ClientConfirmCloseTarget::Workspace {
-                                endpoint_id,
-                                workspace_id,
-                            } => {
-                                self.push_endpoint_method_to(
-                                    &endpoint_id,
-                                    crate::api::schema::Method::WorkspaceClose(
-                                        crate::api::schema::WorkspaceCloseParams {
-                                            workspace_id,
-                                            close_group: true,
-                                        },
-                                    ),
-                                    outcome,
-                                );
-                            }
-                            ClientConfirmCloseTarget::Pane {
-                                endpoint_id,
-                                pane_id,
-                            } => {
-                                self.push_endpoint_method_to(
-                                    &endpoint_id,
-                                    crate::api::schema::Method::PaneClose(
-                                        crate::api::schema::PaneTarget { pane_id },
-                                    ),
-                                    outcome,
-                                );
-                            }
-                            ClientConfirmCloseTarget::Tab {
-                                endpoint_id,
-                                tab_id,
-                            } => {
-                                self.push_endpoint_method_to(
-                                    &endpoint_id,
-                                    crate::api::schema::Method::TabClose(
-                                        crate::api::schema::TabTarget { tab_id },
-                                    ),
-                                    outcome,
-                                );
-                            }
-                        }
-                        self.restore_navigator_after_confirm(return_to_navigator);
-                        outcome.repaint = true;
+                        self.accept_close_confirmation(outcome);
                     }
                     _ => {}
                 }
@@ -1795,7 +1729,8 @@ impl ClientShellState {
                     Some(ClientShellOverlay::ConfirmClose(confirm)) => confirm.return_to_navigator,
                     _ => None,
                 };
-                self.overlay = return_to_navigator.map(ClientShellOverlay::Navigator);
+                self.overlay =
+                    return_to_navigator.map(|navigator| ClientShellOverlay::Navigator(*navigator));
                 outcome.repaint = true;
             }
             return;
@@ -1825,7 +1760,7 @@ impl ClientShellState {
                 .as_mut()
                 .is_some_and(crate::selection::Selection::finish);
             if copied && self.config.copy_on_select {
-                self.request_selection_copy(outcome, false);
+                self.request_selection_copy(outcome, true);
                 self.selection = None;
             } else if self
                 .selection

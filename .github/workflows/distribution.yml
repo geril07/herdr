@@ -70,8 +70,11 @@ jobs:
           python3 scripts/agent_detection_manifest_check.py --require-published
           python3 scripts/config_reference_check.py
           python3 scripts/docs_translation_parity.py --docs-root docs/next/website/src/content/docs
-          node scripts/docs/versions.mjs check
           node scripts/docs/preview.mjs check
+          # scripts/docs/versions.mjs check is upstream-only. It resolves every
+          # docs/versions manifest entry against a v* release tag, and this fork
+          # publishes no version docs and tags releases custom-v* per FORK.md.
+          # Re-enable it if the fork ever starts serving docs/versions.
 
       - name: Test contract tooling
         run: |

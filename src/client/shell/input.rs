@@ -129,7 +129,7 @@ impl ClientShellState {
     }
 
     fn prepare_committed_text(&mut self, text: &str, outcome: &mut ClientShellInput) -> bool {
-        if !(self.mode == ClientShellMode::Navigate && self.navigation_preview_action_blocked())
+        if !(self.mode == ClientShellMode::Navigate && self.workspace_preview_action_blocked())
             && self.insert_copy_search_text(text)
         {
             outcome.repaint = true;
@@ -163,6 +163,9 @@ impl ClientShellState {
             outcome.repaint = true;
         }
         for event in events {
+            if self.handle_machine_badge_event(&event, &mut outcome) {
+                continue;
+            }
             if let Some(update) = host_theme_update(&event) {
                 push_host_theme_update(&mut outcome.requests, update);
             }
@@ -303,11 +306,11 @@ impl ClientShellState {
         key: crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) {
-        outcome.repaint |= self.clear_link_hover();
         // Layout-independent shortcuts: normalize `ctrl+ц` to `ctrl+w` before
         // lease tracking, keybind matching, and pane forwarding so press,
         // repeat, and release share one identity. Plain typing is untouched.
         let key = key.normalized_for_shortcut();
+        outcome.repaint |= self.clear_link_hover();
         if self.copy_operation_in_flight {
             self.copy_input_queue.push_back(key);
             return;
@@ -445,7 +448,7 @@ impl ClientShellState {
             || self.popup_input_target().is_some()
             || (self.overlay.is_none()
                 && self.mode == ClientShellMode::Navigate
-                && self.navigation_preview_action_blocked())
+                && self.workspace_preview_action_blocked())
         {
             return false;
         }
@@ -475,10 +478,6 @@ impl ClientShellState {
                     }
                 ))
                 | Some(ClientShellOverlay::Navigator(ClientNavigatorOverlay {
-                    search_focused: true,
-                    ..
-                }))
-                | Some(ClientShellOverlay::AgentPicker(ClientAgentPickerOverlay {
                     search_focused: true,
                     ..
                 }))
@@ -574,7 +573,7 @@ impl ClientShellState {
                     self.record_binding(binding, outcome);
                     return None;
                 }
-                if crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix) {
+                if self.config.keybinds.matches_prefix(key) {
                     self.mode = ClientShellMode::Prefix;
                     outcome.repaint = true;
                     return None;
@@ -589,7 +588,7 @@ impl ClientShellState {
                 } else {
                     ClientShellMode::Terminal
                 };
-                if crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix) {
+                if self.config.keybinds.matches_prefix(key) {
                     self.mode = return_mode;
                     outcome.repaint = true;
                     return self.focused_pane_id().map(ClientInputTarget::Pane);
@@ -624,7 +623,7 @@ impl ClientShellState {
                     .copy_mode
                     .as_ref()
                     .is_none_or(|copy_mode| copy_mode.search_prompt.is_none())
-                    && crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
+                    && self.config.keybinds.matches_prefix(key)
                 {
                     self.mode = ClientShellMode::Prefix;
                     outcome.repaint = true;
@@ -653,11 +652,10 @@ impl ClientShellState {
     ) {
         use crate::input::{KeybindAction, KeybindDispatch, KeybindMatch};
 
-        if key.code == KeyCode::Esc
-            || crate::config::terminal_key_matches_combo(key, self.config.keybinds.prefix)
-        {
+        self.pending_workspace_highlight = None;
+        if key.code == KeyCode::Esc || self.config.keybinds.matches_prefix(key) {
             self.mode = self.copy_or_terminal_mode();
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
             outcome.repaint = true;
             return;
         }
@@ -670,10 +668,7 @@ impl ClientShellState {
             .workspace_up
             .matches_direct_key(key)
         {
-            match self.navigate_section {
-                SidebarNavSection::Spaces => self.move_navigate_workspace(-1),
-                SidebarNavSection::Agents => self.move_navigate_agent(-1),
-            }
+            self.move_navigate_workspace(-1);
             outcome.repaint = true;
             return;
         }
@@ -685,78 +680,17 @@ impl ClientShellState {
             .workspace_down
             .matches_direct_key(key)
         {
-            match self.navigate_section {
-                SidebarNavSection::Spaces => self.move_navigate_workspace(1),
-                SidebarNavSection::Agents => self.move_navigate_agent(1),
-            }
+            self.move_navigate_workspace(1);
             outcome.repaint = true;
             return;
         }
 
         let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-        let opens_selection = modifiers.is_empty()
-            && (code == KeyCode::Enter
-                || self
-                    .config
-                    .keybinds
-                    .keybinds
-                    .navigate
-                    .workspace_open
-                    .matches_direct_key(key));
-        if opens_selection {
-            match self.navigate_section {
-                SidebarNavSection::Spaces => self.accept_navigate_workspace(outcome),
-                SidebarNavSection::Agents => self.accept_navigate_agent(outcome),
-            }
+        if code == KeyCode::Enter && modifiers.is_empty() {
+            self.accept_navigate_workspace(outcome);
             return;
         }
-        // Tab is always allowed as a recovery path between sections,
-        // even when one preview went stale.
-        if modifiers.is_empty() && matches!(code, KeyCode::Tab | KeyCode::BackTab) {
-            self.switch_navigate_section();
-            outcome.repaint = true;
-            return;
-        }
-        if let Some(index) = ('1'..='9').position(|digit| {
-            crate::config::terminal_key_matches_combo(
-                key,
-                (KeyCode::Char(digit), KeyModifiers::empty()),
-            )
-        }) {
-            // Digits check only the active section so a stale hidden preview
-            // does not block the visible list. None stays unblocked (empty list).
-            if self.active_section_blocked() {
-                self.push_active_section_blocked_notice();
-                outcome.repaint = true;
-                return;
-            }
-            let valid = match self.navigate_section {
-                SidebarNavSection::Spaces => self.snapshot.as_deref().is_some_and(|snapshot| {
-                    self.navigation_workspace_entries(snapshot)
-                        .get(index)
-                        .is_some()
-                }),
-                SidebarNavSection::Agents => super::aggregate_navigation::online_agent_targets(
-                    &self.endpoints,
-                    &self.active_endpoint_id,
-                    self.config.agent_panel_sort,
-                )
-                .get(index)
-                .is_some(),
-            };
-            if valid {
-                self.mode = ClientShellMode::Terminal;
-                let binding = match self.navigate_section {
-                    SidebarNavSection::Spaces => KeybindAction::SwitchWorkspace(index),
-                    SidebarNavSection::Agents => KeybindAction::FocusAgent(index),
-                };
-                self.clear_navigate_preview();
-                self.record_binding(KeybindMatch::Action(binding), outcome);
-                outcome.repaint = true;
-            }
-            return;
-        }
-        if self.navigation_preview_action_blocked() {
+        if self.workspace_preview_action_blocked() {
             self.push_endpoint_notice(
                 ClientEndpointNoticeKind::Rejected,
                 "navigate_endpoint_inactive",
@@ -767,8 +701,47 @@ impl ClientShellState {
             return;
         }
 
+        if let Some(index) = ('1'..='9').position(|digit| {
+            crate::config::terminal_key_matches_combo(
+                key,
+                (KeyCode::Char(digit), KeyModifiers::empty()),
+            )
+        }) {
+            let valid = self.snapshot.as_deref().is_some_and(|snapshot| {
+                self.navigation_workspace_entries(snapshot)
+                    .get(index)
+                    .is_some()
+            });
+            if valid {
+                self.mode = ClientShellMode::Terminal;
+                self.navigate_workspace_id = None;
+                self.record_binding(
+                    KeybindMatch::Action(KeybindAction::SwitchWorkspace(index)),
+                    outcome,
+                );
+                outcome.repaint = true;
+            }
+            return;
+        }
+
         if modifiers.is_empty() {
             match code {
+                KeyCode::Tab => {
+                    self.record_navigate_binding(
+                        KeybindMatch::Action(KeybindAction::CyclePaneNext),
+                        false,
+                        outcome,
+                    );
+                    return;
+                }
+                KeyCode::BackTab => {
+                    self.record_navigate_binding(
+                        KeybindMatch::Action(KeybindAction::CyclePanePrevious),
+                        false,
+                        outcome,
+                    );
+                    return;
+                }
                 KeyCode::Left => {
                     self.record_navigate_binding(
                         KeybindMatch::Action(KeybindAction::FocusPaneLeft),
@@ -814,8 +787,6 @@ impl ClientShellState {
             return;
         }
 
-        // Navigate mode is a workspace-preview context. Keep built-in prefix actions
-        // available, but do not run arbitrary custom commands against the preview.
         let binding = crate::input::resolve_non_indexed_action(
             &self.config.keybinds.keybinds,
             key,
@@ -831,6 +802,14 @@ impl ClientShellState {
             )
         })
         .map(KeybindMatch::Action)
+        .or_else(|| {
+            crate::input::resolve_custom_command(
+                &self.config.keybinds.keybinds,
+                key,
+                KeybindDispatch::Prefix,
+            )
+            .map(KeybindMatch::Command)
+        })
         .or_else(|| {
             crate::input::resolve_indexed_action(
                 &self.config.keybinds.keybinds,
@@ -869,7 +848,7 @@ impl ClientShellState {
             if self.mode == ClientShellMode::Navigate {
                 self.mode = self.copy_or_terminal_mode();
             }
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
         }
         outcome.repaint = true;
     }

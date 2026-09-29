@@ -63,13 +63,13 @@ fn indexed_range_prefix(bindings: &[IndexedKeybind]) -> Option<&str> {
 
 pub(crate) fn keybind_help_groups(
     keybinds: &Keybinds,
-    prefix: (crossterm::event::KeyCode, crossterm::event::KeyModifiers),
+    prefixes: &[crate::config::KeyCombo],
 ) -> Vec<KeybindHelpGroup> {
     let mut groups = vec![
         (
             "global",
             vec![
-                entry(crate::config::format_key_combo(prefix), "prefix mode"),
+                entry(crate::config::format_prefix_combos(prefixes), "prefix mode"),
                 entry(binding_label(&keybinds.help), "keybinds"),
                 entry(binding_label(&keybinds.settings), "settings"),
                 entry(binding_label(&keybinds.detach), "detach"),
@@ -90,14 +90,7 @@ pub(crate) fn keybind_help_groups(
                         binding_label(&keybinds.navigate.workspace_up),
                         binding_label(&keybinds.navigate.workspace_down)
                     ),
-                    "move selection",
-                ),
-                entry(
-                    format!(
-                        "enter / {}",
-                        binding_label(&keybinds.navigate.workspace_open)
-                    ),
-                    "open workspace / agent",
+                    "workspace list",
                 ),
                 entry(
                     format!(
@@ -109,8 +102,9 @@ pub(crate) fn keybind_help_groups(
                     ),
                     "move focus",
                 ),
-                entry("tab / shift+tab", "switch section"),
-                entry("1..9", "open workspace / agent"),
+                entry("tab / shift+tab", "cycle pane"),
+                entry("enter", "open workspace"),
+                entry("1..9", "switch workspace"),
             ],
         ),
         (
@@ -120,11 +114,6 @@ pub(crate) fn keybind_help_groups(
                     binding_label(&keybinds.workspace_picker),
                     "workspace navigation",
                 ),
-                entry(
-                    binding_label(&keybinds.agent_navigation),
-                    "agent navigation",
-                ),
-                entry(binding_label(&keybinds.agent_picker), "agent picker"),
                 entry(binding_label(&keybinds.goto), "session navigator"),
                 entry(binding_label(&keybinds.new_workspace), "new workspace"),
                 entry(binding_label(&keybinds.new_worktree), "new worktree"),
@@ -171,6 +160,7 @@ pub(crate) fn keybind_help_groups(
                 entry(binding_label(&keybinds.close_pane), "close pane"),
                 entry(binding_label(&keybinds.rename_pane), "rename pane"),
                 entry(binding_label(&keybinds.edit_scrollback), "edit scrollback"),
+                entry(binding_label(&keybinds.clear_pane), "clear pane"),
                 entry(binding_label(&keybinds.copy_mode), "copy mode"),
                 entry(binding_label(&keybinds.zoom), "zoom pane"),
                 entry(binding_label(&keybinds.resize_mode), "resize mode"),
@@ -276,5 +266,19 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1[0].1, "close pane");
         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+    }
+
+    #[test]
+    fn help_lists_every_configured_prefix() {
+        let groups = keybind_help_groups(
+            &Keybinds::default(),
+            &[
+                (KeyCode::Char(' '), KeyModifiers::CONTROL),
+                (KeyCode::Char('s'), KeyModifiers::CONTROL),
+            ],
+        );
+        let global = &groups[0].1;
+        assert_eq!(global[0].0, "ctrl+space / ctrl+s");
+        assert_eq!(global[0].1, "prefix mode");
     }
 }

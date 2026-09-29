@@ -5,63 +5,6 @@ pub(super) const NEW_TAB_WIDTH: u16 = 3;
 pub(super) const WORKSPACE_HEADER_ROWS: u16 = 2;
 const ENDPOINT_ERROR_TIMEOUT_SECS: u64 = 5;
 
-fn pane_surface_row<'a>(
-    surface: &'a PaneSurfaceFrame,
-    pane: &crate::protocol::PaneSurfacePane,
-    absolute_row: u32,
-) -> Option<&'a [crate::protocol::CellData]> {
-    let viewport_top = pane
-        .scroll
-        .map(|scroll| {
-            scroll
-                .max_offset_from_bottom
-                .saturating_sub(scroll.offset_from_bottom) as u32
-        })
-        .unwrap_or(0);
-    let viewport_row = u16::try_from(absolute_row.checked_sub(viewport_top)?).ok()?;
-    if viewport_row >= pane.inner_rect.height {
-        return None;
-    }
-    let start = (usize::from(pane.inner_rect.y) + usize::from(viewport_row))
-        * usize::from(surface.frame.width)
-        + usize::from(pane.inner_rect.x);
-    surface
-        .frame
-        .cells
-        .get(start..start + usize::from(pane.inner_rect.width))
-}
-
-fn selection_cells_unchanged(
-    selection: &crate::selection::Selection<String>,
-    previous_surface: &PaneSurfaceFrame,
-    previous_pane: &crate::protocol::PaneSurfacePane,
-    next_surface: &PaneSurfaceFrame,
-    next_pane: &crate::protocol::PaneSurfacePane,
-) -> bool {
-    let ((start_row, start_col), (end_row, end_col)) = selection.ordered_cells();
-    (start_row..=end_row).all(|row| {
-        let first_col = if row == start_row { start_col } else { 0 };
-        let last_col = if row == end_row {
-            end_col
-        } else {
-            previous_pane.inner_rect.width.saturating_sub(1)
-        };
-        pane_surface_row(previous_surface, previous_pane, row)
-            .zip(pane_surface_row(next_surface, next_pane, row))
-            .and_then(|(previous, next)| {
-                previous
-                    .get(usize::from(first_col)..=usize::from(last_col))
-                    .zip(next.get(usize::from(first_col)..=usize::from(last_col)))
-            })
-            .is_some_and(|(previous, next)| {
-                previous
-                    .iter()
-                    .zip(next)
-                    .all(|(previous, next)| previous.symbol == next.symbol)
-            })
-    })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientShellKeybindingSource {
     Local,
@@ -104,11 +47,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) keybinding_source: ClientShellKeybindingSource,
     pub(super) prompt_new_tab_name: bool,
     pub(super) prompt_new_workspace_name: bool,
-    pub(super) navigator_start_expanded: bool,
-    pub(super) navigator_start_search_focused: bool,
     pub(super) confirm_close: bool,
     pub(super) confirm_pane_close: bool,
-    pub(super) confirm_tab_close: bool,
     pub(super) mouse_capture: bool,
     pub(super) mouse_scroll_lines: usize,
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
@@ -190,9 +130,8 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_popup: Rect,
     pub(super) navigator_search: Rect,
     pub(super) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
-    pub(super) agent_picker_popup: Rect,
-    pub(super) agent_picker_search: Rect,
-    pub(super) agent_picker_rows: Vec<(Rect, ClientEndpointId, String)>,
+    pub(super) navigator_scrollbar: Rect,
+    pub(super) navigator_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
     pub(super) help_popup: Rect,
@@ -266,6 +205,9 @@ pub(super) enum ClientChromeDrag {
         grab_row_offset: u16,
     },
     HelpScrollbar {
+        grab_row_offset: u16,
+    },
+    NavigatorScrollbar {
         grab_row_offset: u16,
     },
     ProductAnnouncementScrollbar {
@@ -352,7 +294,6 @@ pub(super) enum ClientShellOverlayKind {
     ConfirmClose,
     Help,
     Navigator,
-    AgentPicker,
     WorktreeCreate,
     WorktreeOpen,
     WorktreeRemove,
@@ -409,10 +350,6 @@ pub(super) enum ClientNavigatorTarget {
         endpoint_id: ClientEndpointId,
         workspace_id: String,
     },
-    Tab {
-        endpoint_id: ClientEndpointId,
-        tab_id: String,
-    },
     Pane {
         endpoint_id: ClientEndpointId,
         pane_id: String,
@@ -424,6 +361,8 @@ pub(super) struct ClientNavigatorRow {
     pub(super) depth: u8,
     pub(super) label: String,
     pub(super) meta: String,
+    pub(super) detail: String,
+    pub(super) agent: Option<String>,
     pub(super) status: Option<crate::api::schema::AgentStatus>,
     pub(super) stale: bool,
     pub(super) current: bool,
@@ -435,16 +374,6 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) query: TextEditor,
     pub(super) search_focused: bool,
     pub(super) selected: Option<ClientNavigatorTarget>,
-    pub(super) scroll: usize,
-    pub(super) filter: Option<ClientNavigatorFilter>,
-    pub(super) expanded_workspaces: HashSet<(ClientEndpointId, String)>,
-}
-
-#[derive(Debug)]
-pub(super) struct ClientAgentPickerOverlay {
-    pub(super) query: String,
-    pub(super) search_focused: bool,
-    pub(super) selected: Option<(ClientEndpointId, String)>,
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
 }
@@ -643,27 +572,28 @@ pub(super) struct ClientContextMenuItem {
 }
 
 #[derive(Debug)]
-pub(super) enum ClientConfirmCloseTarget {
-    Workspace {
-        endpoint_id: ClientEndpointId,
-        workspace_id: String,
-    },
-    Pane {
-        endpoint_id: ClientEndpointId,
-        pane_id: String,
-    },
-    Tab {
-        endpoint_id: ClientEndpointId,
-        tab_id: String,
-    },
+pub(super) struct ClientTabCloseConfirmation {
+    pub(super) tab_id: String,
+    pub(super) workspace: WorkspaceNavigationTarget,
+}
+
+#[derive(Debug)]
+pub(super) struct ClientPaneCloseConfirmation {
+    pub(super) pane_id: String,
+    pub(super) workspace: WorkspaceNavigationTarget,
 }
 
 #[derive(Debug)]
 pub(super) struct ClientConfirmCloseOverlay {
-    pub(super) target: ClientConfirmCloseTarget,
+    pub(super) workspace_id: String,
+    pub(super) tab_target: Option<ClientTabCloseConfirmation>,
+    pub(super) pane_target: Option<ClientPaneCloseConfirmation>,
     pub(super) title: String,
     pub(super) detail: String,
-    pub(super) return_to_navigator: Option<ClientNavigatorOverlay>,
+    /// Navigator to reopen when this dialog closes. Boxed to keep
+    /// `ClientShellOverlay` small: it is matched on every render and key event,
+    /// and a full `ClientNavigatorOverlay` inline would dominate the enum.
+    pub(super) return_to_navigator: Option<Box<ClientNavigatorOverlay>>,
 }
 
 #[derive(Debug)]
@@ -675,7 +605,6 @@ pub(super) enum ClientShellOverlay {
     ConfirmClose(ClientConfirmCloseOverlay),
     Help(ClientHelpOverlay),
     Navigator(ClientNavigatorOverlay),
-    AgentPicker(ClientAgentPickerOverlay),
     WorktreeCreate(ClientWorktreeCreateOverlay),
     WorktreeOpen(ClientWorktreeOpenOverlay),
     WorktreeRemove(ClientWorktreeRemoveOverlay),
@@ -694,7 +623,6 @@ impl ClientShellOverlay {
             Self::ConfirmClose(_) => ClientShellOverlayKind::ConfirmClose,
             Self::Help(_) => ClientShellOverlayKind::Help,
             Self::Navigator(_) => ClientShellOverlayKind::Navigator,
-            Self::AgentPicker(_) => ClientShellOverlayKind::AgentPicker,
             Self::WorktreeCreate(_) => ClientShellOverlayKind::WorktreeCreate,
             Self::WorktreeOpen(_) => ClientShellOverlayKind::WorktreeOpen,
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,
@@ -769,7 +697,6 @@ pub(super) struct PendingEndpointRequest {
     pub(super) boot_id: String,
     pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
-    pub(super) confirmation_endpoint_id: Option<ClientEndpointId>,
     pub(super) kind: PendingEndpointKind,
 }
 
@@ -919,6 +846,7 @@ pub(super) struct ClientCopyModeState {
     pub(super) pane_id: String,
     pub(super) content_revision: u64,
     pub(super) geometry: (u16, u16),
+    pub(super) alternate_screen_active: bool,
     pub(super) cursor: crate::api::schema::PaneTextPoint,
     pub(super) offset_from_bottom: usize,
     pub(super) max_offset_from_bottom: usize,
@@ -936,6 +864,7 @@ pub(super) struct ClientCopyModeState {
 }
 
 pub(crate) struct ClientShellState {
+    pub(super) machine_diagnostics: super::machine_diagnostics::MachineDiagnostics,
     pub(super) config: ClientShellConfig,
     pub(super) snapshot: Option<Box<ClientShellSnapshot>>,
     pub(super) active_snapshot_generation: Option<u64>,
@@ -962,6 +891,7 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
+    pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
     pub(super) reveal_focused_workspace: bool,
@@ -979,8 +909,7 @@ pub(crate) struct ClientShellState {
     pub(super) collapsed_endpoints: HashSet<ClientEndpointId>,
     pub(super) mode: ClientShellMode,
     pub(super) navigate_workspace_id: Option<WorkspaceNavigationTarget>,
-    pub(super) navigate_agent: Option<AgentNavigationTarget>,
-    pub(super) navigate_section: SidebarNavSection,
+    pub(super) pending_workspace_highlight: Option<PendingWorkspaceHighlight>,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
@@ -1101,13 +1030,14 @@ impl ClientShellState {
                 .extend(saved.collapsed_groups);
         }
         Self {
+            machine_diagnostics: Default::default(),
             config,
             snapshot: None,
             active_snapshot_generation: None,
             pane_surface_generation: None,
             pane_surface: None,
             pending_pane_surface: None,
-            graphics: crate::kitty_graphics::surface::ClientState::default(),
+            graphics: crate::kitty_graphics::surface::ClientState::new(),
             graphics_cell_size: crate::kitty_graphics::HostCellSize {
                 width_px: 1,
                 height_px: 1,
@@ -1128,6 +1058,7 @@ impl ClientShellState {
             remote_collapsed_groups,
             workspace_scroll: 0,
             agent_scroll: 0,
+            pending_agent_reveal: None,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,
             reveal_focused_workspace: true,
@@ -1145,8 +1076,7 @@ impl ClientShellState {
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,
             navigate_workspace_id: None,
-            navigate_agent: None,
-            navigate_section: SidebarNavSection::Spaces,
+            pending_workspace_highlight: None,
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,
@@ -1211,7 +1141,7 @@ impl ClientShellState {
             .is_some()
         {
             self.mode = self.copy_or_terminal_mode();
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
         } else {
             self.mode = ClientShellMode::Navigate;
         }
@@ -1337,7 +1267,8 @@ impl ClientShellState {
         self.visible_endpoint_notice = None;
         self.endpoint_error = None;
         self.endpoint_error_deadline = None;
-        self.clear_navigate_preview();
+        self.navigate_workspace_id = None;
+        self.pending_workspace_highlight = None;
         self.overlay = self
             .config
             .startup_onboarding
@@ -1444,19 +1375,11 @@ impl ClientShellState {
         }
         if boot_changed {
             // A reboot must not turn Enter on a stale preview into focus on a reused ID.
-            let preview = (self.mode == ClientShellMode::Navigate).then(|| {
-                (
-                    self.navigate_workspace_id.take(),
-                    self.navigate_agent.take(),
-                    self.navigate_section,
-                )
-            });
+            let preview = (self.mode == ClientShellMode::Navigate)
+                .then(|| self.navigate_workspace_id.take())
+                .flatten();
             self.reset_endpoint_projection();
-            if let Some((workspace, agent, section)) = preview {
-                self.navigate_workspace_id = workspace;
-                self.navigate_agent = agent;
-                self.navigate_section = section;
-            }
+            self.navigate_workspace_id = preview;
         } else if let Some(previous) = self
             .snapshot
             .as_deref()
@@ -1593,9 +1516,6 @@ impl ClientShellState {
                 .and_then(|id| self.navigation_target(&self.active_endpoint_id, id));
             self.reveal_mobile_workspace = self.mobile_layout_active();
         }
-        if self.mode == ClientShellMode::Navigate && self.navigate_agent.is_none() {
-            self.navigate_agent = self.initial_agent_target();
-        }
         let pane_exists =
             |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
         self.pane_scroll_in_flight
@@ -1661,6 +1581,7 @@ impl ClientShellState {
             }
         }
         self.snapshot = Some(snapshot);
+        self.reconcile_pending_workspace_highlight();
         self.refresh_config_diagnostic();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
@@ -1752,7 +1673,7 @@ impl ClientShellState {
                     .remove_target(&ClientInputTarget::Popup(terminal_id.clone()));
             }
             self.mode = ClientShellMode::Terminal;
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
             if !matches!(
                 self.overlay.as_ref(),
                 Some(ClientShellOverlay::Onboarding | ClientShellOverlay::ProductAnnouncement(_))
@@ -1790,7 +1711,7 @@ impl ClientShellState {
             Some(gesture) => Some(&gesture.pane_id),
             None => self.selection.as_ref().map(|selection| &selection.pane_id),
         };
-        let selection_content_changed = selection_pane.is_some_and(|pane_id| {
+        let selection_invalidated = selection_pane.is_some_and(|pane_id| {
             let Some(previous_surface) = self.pane_surface.as_ref() else {
                 return false;
             };
@@ -1802,34 +1723,15 @@ impl ClientShellState {
             let (Some(previous), Some(next)) = (previous, next) else {
                 return false;
             };
-            if previous.inner_rect.width != next.inner_rect.width
+            previous.inner_rect.width != next.inner_rect.width
                 || previous.inner_rect.height != next.inner_rect.height
                 || previous.alternate_screen_active != next.alternate_screen_active
-            {
-                return true;
-            }
-            if previous.content_revision == next.content_revision {
-                return false;
-            }
-            match (&self.word_selection_gesture, &self.selection) {
-                // Word gestures cache boundaries outside the selected cells too.
-                (Some(_), _) => true,
-                (None, Some(selection)) => {
-                    self.config.copy_on_select
-                        && (!previous.content_revision.is_multiple_of(2)
-                            || !next.content_revision.is_multiple_of(2)
-                            || !selection_cells_unchanged(
-                                selection,
-                                previous_surface,
-                                previous,
-                                &surface,
-                                next,
-                            ))
-                }
-                (None, None) => false,
-            }
+                // Ordinary selections are live buffer ranges. Only word gestures
+                // cache content-dependent boundaries that output can invalidate.
+                || (self.word_selection_gesture.is_some()
+                    && previous.content_revision != next.content_revision)
         });
-        if selection_content_changed {
+        if selection_invalidated {
             self.word_selection_gesture = None;
             self.selection = None;
             self.stop_selection_autoscroll();
@@ -1856,19 +1758,22 @@ impl ClientShellState {
                 .find(|pane| pane.pane_id == copy_mode.pane_id)
             {
                 let geometry = (pane.inner_rect.width, pane.inner_rect.height);
-                if copy_mode.content_revision != pane.content_revision
-                    || copy_mode.geometry != geometry
-                {
+                let coordinates_changed = copy_mode.geometry != geometry
+                    || copy_mode.alternate_screen_active != pane.alternate_screen_active;
+                if copy_mode.content_revision != pane.content_revision || coordinates_changed {
                     copy_mode.content_revision = pane.content_revision;
                     copy_mode.geometry = geometry;
-                    copy_mode.selection = None;
+                    copy_mode.alternate_screen_active = pane.alternate_screen_active;
+                    if coordinates_changed {
+                        copy_mode.selection = None;
+                        invalidated_copy_pane = Some(copy_mode.pane_id.clone());
+                    }
                     copy_mode.search_matches.clear();
                     copy_mode.search_total = 0;
                     copy_mode.search_current = None;
                     copy_mode.search_current_global = None;
                     copy_mode.search_generation = copy_mode.search_generation.saturating_add(1);
                     copy_mode.copy_after_search = false;
-                    invalidated_copy_pane = Some(copy_mode.pane_id.clone());
                 }
                 if let Some(scroll) = pane.scroll {
                     let actual_offset =

@@ -183,6 +183,7 @@ fn pane_scroll_result(
             focused: true,
             cwd: None,
             foreground_cwd: None,
+            restore_error: None,
             label: None,
             agent: None,
             title: None,
@@ -244,9 +245,9 @@ fn surface_with_popup() -> PaneSurfaceFrame {
     surface
 }
 
-mod agent_navigation;
 mod agents_worktrees_notifications;
 mod chrome_context;
+mod close_tab;
 mod copy;
 mod endpoint_requests;
 mod endpoints;

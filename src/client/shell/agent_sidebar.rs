@@ -42,35 +42,10 @@ pub(super) fn ordered_agent_pane_ids(
                 std::cmp::Reverse(agent.state_change_seq),
             )
         });
-    } else {
-        let order = grouped_workspace_order(snapshot);
-        agents.sort_by_key(|agent| {
-            order
-                .get(&agent.workspace_id)
-                .copied()
-                .unwrap_or(usize::MAX)
-        });
     }
     agents
         .into_iter()
         .map(|agent| agent.pane_id.clone())
-        .collect()
-}
-
-/// Grouped workspace position (parent, children, standalone) used to keep the
-/// agents panel in the same order as the spaces panel. Uses the fully expanded
-/// grouping so agents of collapsed groups stay ordered instead of hidden.
-fn grouped_workspace_order(snapshot: &ClientShellSnapshot) -> HashMap<String, usize> {
-    let empty = std::collections::HashSet::new();
-    super::render::workspace_entries(snapshot, &empty)
-        .into_iter()
-        .enumerate()
-        .filter_map(|(position, entry)| {
-            snapshot
-                .workspaces
-                .get(entry.index)
-                .map(|workspace| (workspace.workspace_id.clone(), position))
-        })
         .collect()
 }
 
@@ -80,7 +55,6 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
-    selected_pane_id: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -108,8 +82,7 @@ pub(super) fn render_agent_panel(
         |row| row.rows.len(),
         |buffer, rect, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            let selected = selected_pane_id == Some(row.pane_id.as_str());
-            render_agent_row(buffer, rect, row, config, selected);
+            render_agent_row(buffer, rect, row, config);
         },
     );
 }
@@ -359,17 +332,9 @@ pub(super) fn render_agent_row(
     rect: Rect,
     row: &AgentRow,
     config: &ClientShellConfig,
-    selected: bool,
 ) {
     let palette = &config.palette;
-    let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
-        palette.active_row_bg
-    } else {
-        palette.selection_bg
-    };
-    let row_style = if selected {
-        Style::default().bg(selection_background)
-    } else if row.focused {
+    let row_style = if row.focused {
         Style::default().bg(palette.active_row_bg)
     } else {
         Style::default()
@@ -447,10 +412,7 @@ pub(super) fn current_unix_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-pub(super) fn format_status_elapsed(
-    now_unix_ms: u64,
-    status_changed_unix_ms: u64,
-) -> Option<String> {
+fn format_status_elapsed(now_unix_ms: u64, status_changed_unix_ms: u64) -> Option<String> {
     let elapsed_minutes = now_unix_ms.checked_sub(status_changed_unix_ms)? / 60_000;
     if elapsed_minutes == 0 {
         return Some("<1m".into());

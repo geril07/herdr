@@ -7,22 +7,12 @@ pub(super) fn render_collapsed(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
-    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
     let rows = agent_rows(endpoints, active_endpoint_id, config);
     for (index, row) in rows.into_iter().take(area.height as usize).enumerate() {
         let rect = Rect::new(area.x, area.y + index as u16, area.width, 1);
-        let selected = selected_agent
-            .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
-        if selected {
-            let background = if config.palette.selection_bg == ratatui::style::Color::Reset {
-                config.palette.active_row_bg
-            } else {
-                config.palette.selection_bg
-            };
-            buffer.set_style(rect, Style::default().bg(background));
-        } else if row.agent.focused {
+        if row.agent.focused {
             buffer.set_style(rect, Style::default().bg(config.palette.active_row_bg));
         }
         let initial = row.machine_label.chars().next().unwrap_or('?');
@@ -60,7 +50,6 @@ pub(super) fn render_expanded(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
-    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
     if !super::agent_sidebar::render_agent_panel_header(
@@ -83,9 +72,7 @@ pub(super) fn render_expanded(
         hits,
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {
-            let selected = selected_agent
-                .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config, selected);
+            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
             if row.stale {
                 buffer.set_style(
                     rect,
@@ -98,6 +85,41 @@ pub(super) fn render_expanded(
                 .push((rect, row.endpoint_id.clone(), row.agent.pane_id.clone()));
         },
     );
+}
+
+impl ClientShellState {
+    pub(super) fn reveal_endpoint_agent(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        pane_id: &str,
+        body_height: u16,
+    ) {
+        if body_height == 0 {
+            return;
+        }
+        let rows = agent_rows(&self.endpoints, &self.active_endpoint_id, &self.config);
+        let Some(target) = rows
+            .iter()
+            .position(|row| &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id)
+        else {
+            return;
+        };
+        let heights = rows
+            .iter()
+            .map(|row| row.agent.rows.len().max(1).min(u16::MAX as usize) as u16)
+            .collect::<Vec<_>>();
+        let mut gaps = vec![self.config.agents.row_gap; rows.len()];
+        if let Some(last) = gaps.last_mut() {
+            *last = 0;
+        }
+        self.agent_scroll = super::scroll::list_scroll_start_to_reveal(
+            &heights,
+            &gaps,
+            body_height,
+            self.agent_scroll,
+            target,
+        );
+    }
 }
 
 struct EndpointAgentRow {

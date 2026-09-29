@@ -23,7 +23,7 @@ mod config;
 mod copy_mode;
 mod detect;
 mod events;
-mod ghostty;
+use ghostty_vt as ghostty;
 mod handoff_runtime;
 mod input;
 mod integration;
@@ -34,7 +34,7 @@ mod logging;
 mod metadata_tokens;
 mod noninteractive_process;
 mod pane;
-mod pane_graphics_files;
+use ghostty_vt::pane_graphics_files;
 mod persist;
 mod platform;
 mod plugin_command;
@@ -148,8 +148,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # reload_config = "prefix+shift+r"
 # open_notification_target = "prefix+o"
 # workspace_picker = "prefix+w"
-# agent_navigation = "prefix+a"
-# agent_picker = "prefix+shift+a"
 # goto = "prefix+g"
 # new_workspace = "prefix+shift+n"
 # new_worktree = "prefix+shift+g"
@@ -174,6 +172,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # close_tab = "prefix+shift+x"
 # rename_pane = "prefix+shift+p"
 # edit_scrollback = "prefix+e"
+# clear_pane = ""                  # unbound; e.g. "prefix+ctrl+k"
 # focus_pane_left = "prefix+h"
 # focus_pane_down = "prefix+j"
 # focus_pane_up = "prefix+k"
@@ -196,7 +195,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
 # navigate_workspace_up = "up"
 # navigate_workspace_down = "down"
-# navigate_workspace_open = "o"  # Enter always opens the selected workspace
 # navigate_pane_left = "h"      # left arrow always focuses the pane to the left
 # navigate_pane_down = "j"
 # navigate_pane_up = "k"
@@ -292,23 +290,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Ask for confirmation before closing a pane
 # confirm_pane_close = true
 
-# Ask for confirmation before closing a tab
-# confirm_tab_close = true
-
 # Ask for a tab name before creating a new tab.
 # Set false to create tabs immediately with generated names.
 # prompt_new_tab_name = true
 
 # Ask for a workspace name before interactive creation.
 # prompt_new_workspace_name = false
-
-# Start the session navigator with all workspaces expanded.
-# Set false for a tmux-style sessions-only list; Space still expands one workspace.
-# navigator_start_expanded = true
-
-# Focus the session navigator search field on open.
-# Set true for fzf-style type-to-filter with Ctrl+n/Ctrl+p navigation.
-# navigator_start_search_focused = false
 
 # Draw borders around split panes.
 # "auto" draws them only for split panes, "always" also frames a lone pane
@@ -428,6 +415,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Resume supported AI-agent panes into their native conversation sessions after
 # a Herdr server restart. Requires official integrations that report session refs.
 # resume_agents_on_restore = true
+# Milliseconds between automatic agent restores; 0 starts them without spacing.
+# startup_per_agent_delay_ms = 100
 
 [remote]
 # Whether herdr manages the ssh config used for `herdr --remote`.

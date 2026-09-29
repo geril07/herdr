@@ -368,7 +368,6 @@ pub(super) fn render_mobile_switcher(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     selected_workspace_id: Option<&WorkspaceNavigationTarget>,
-    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     scroll: &mut usize,
     reveal_workspace: &mut bool,
     hits: &mut ShellHitMap,
@@ -443,34 +442,23 @@ pub(super) fn render_mobile_switcher(
         active_endpoint_id,
         config,
         selected_workspace_id,
-        selected_agent,
         viewport.width.saturating_sub(1),
     );
     let total_rows = items.iter().map(|item| item.lines.len()).sum::<usize>();
     let max_scroll = total_rows.saturating_sub(usize::from(viewport.height));
     *scroll = (*scroll).min(max_scroll);
     if *reveal_workspace {
-        if selected_workspace_id.is_some() || selected_agent.is_some() {
+        if let Some(selected_workspace_id) = selected_workspace_id {
             let mut start = 0usize;
             for item in &items {
                 let end = start.saturating_add(item.lines.len());
-                let wanted = matches!(
+                if matches!(
                     item.target.as_ref(),
                     Some(ClientMobileTarget::Workspace {
                         endpoint_id,
                         workspace_id,
-                    }) if selected_workspace_id.is_some_and(|target| {
-                        target.matches(endpoint_id, workspace_id)
-                    })
-                ) || matches!(
-                    item.target.as_ref(),
-                    Some(ClientMobileTarget::Agent {
-                        endpoint_id,
-                        pane_id,
-                    }) if selected_agent
-                        .is_some_and(|target| target.matches(endpoint_id, pane_id))
-                );
-                if wanted {
+                    }) if selected_workspace_id.matches(endpoint_id, workspace_id)
+                ) {
                     if start < *scroll {
                         *scroll = start;
                     } else if end > (*scroll).saturating_add(usize::from(viewport.height)) {
@@ -590,7 +578,6 @@ fn mobile_items(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     selected_workspace_id: Option<&WorkspaceNavigationTarget>,
-    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     content_width: u16,
 ) -> Vec<MobileItem> {
     let palette = &config.palette;
@@ -698,15 +685,7 @@ fn mobile_items(
             if endpoint.stale() {
                 detail.push(mobile_endpoint_state(endpoint.status).to_owned());
             }
-            let selected = selected_agent
-                .is_some_and(|target| target.matches(endpoint.endpoint_id, &agent.pane_id));
-            let background = if selected {
-                if palette.surface0 == ratatui::style::Color::Reset {
-                    palette.active_row_bg
-                } else {
-                    palette.surface0
-                }
-            } else if endpoint.endpoint_id == active_endpoint_id && agent.focused {
+            let background = if endpoint.endpoint_id == active_endpoint_id && agent.focused {
                 palette.surface_dim
             } else {
                 palette.panel_bg
@@ -789,7 +768,13 @@ fn mobile_items(
                     palette.surface0
                 }
             } else if endpoint.endpoint_id == active_endpoint_id && workspace.focused {
-                palette.surface_dim
+                if selected_workspace_id.is_some()
+                    && palette.surface0 == ratatui::style::Color::Reset
+                {
+                    palette.panel_bg
+                } else {
+                    palette.surface_dim
+                }
             } else {
                 palette.panel_bg
             };
@@ -976,7 +961,11 @@ impl ClientShellState {
             ) && mouse.kind == MouseEventKind::Down(MouseButton::Left)
                 && super::contains(self.hits.mobile_switch, point)
             {
-                self.enter_navigate_mode(SidebarNavSection::Spaces);
+                self.mobile_switcher_scroll = 0;
+                self.reveal_mobile_workspace = false;
+                self.pending_workspace_highlight = None;
+                self.mode = ClientShellMode::Navigate;
+                self.navigate_workspace_id = self.focused_navigation_target();
                 outcome.repaint = true;
                 return true;
             }
@@ -1003,7 +992,7 @@ impl ClientShellState {
 
         if super::contains(self.hits.mobile_close, point) {
             self.mode = ClientShellMode::Terminal;
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
             outcome.repaint = true;
             return true;
         }
@@ -1017,17 +1006,13 @@ impl ClientShellState {
             Some(ClientMobileTarget::Machine(endpoint_id)) => {
                 if endpoint_id == self.active_endpoint_id {
                     self.mode = ClientShellMode::Terminal;
-                    self.clear_navigate_preview();
-                } else if self.endpoint_is_online(&endpoint_id) {
+                    self.navigate_workspace_id = None;
+                    if endpoint_id.is_local() {
+                        self.activate_endpoint(endpoint_id, outcome);
+                    }
+                } else if self.activate_endpoint(endpoint_id, outcome) {
                     self.mode = ClientShellMode::Terminal;
-                    self.clear_navigate_preview();
-                    outcome.actions.push(ClientShellAction::ActivateEndpoint {
-                        endpoint_id,
-                        target: None,
-                    });
-                } else {
-                    let label = self.endpoint_label(&endpoint_id).to_owned();
-                    self.receive_endpoint_unavailable(format!("{label} is not ready"));
+                    self.navigate_workspace_id = None;
                 }
             }
             Some(ClientMobileTarget::NewWorkspace) => {
@@ -1047,7 +1032,7 @@ impl ClientShellState {
                     outcome,
                 ) {
                     self.mode = ClientShellMode::Terminal;
-                    self.clear_navigate_preview();
+                    self.navigate_workspace_id = None;
                 }
             }
             Some(ClientMobileTarget::Agent {
@@ -1060,7 +1045,7 @@ impl ClientShellState {
                     outcome,
                 ) {
                     self.mode = ClientShellMode::Terminal;
-                    self.clear_navigate_preview();
+                    self.navigate_workspace_id = None;
                 }
             }
             Some(ClientMobileTarget::Tab {
@@ -1073,7 +1058,7 @@ impl ClientShellState {
                     outcome,
                 ) {
                     self.mode = ClientShellMode::Terminal;
-                    self.clear_navigate_preview();
+                    self.navigate_workspace_id = None;
                 }
             }
             Some(ClientMobileTarget::NewTab) => {
