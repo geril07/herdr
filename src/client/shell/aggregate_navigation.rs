@@ -46,6 +46,9 @@ pub(super) struct AggregateAgentRow<'a> {
     pub(super) endpoint: CachedEndpointSnapshot<'a>,
     pub(super) agent: &'a ClientShellAgent,
     pub(super) recency: u64,
+    /// Position in the grouped spaces order, resolved once so neither a sort
+    /// comparison nor a sort key re-derives the grouping.
+    pub(super) workspace_order: Option<u64>,
 }
 
 pub(super) struct AggregateAgentTarget {
@@ -81,8 +84,18 @@ pub(super) fn aggregate_agent_rows<'a>(
     });
 
     if let Some(Ok(view)) = active_view {
+        // Only the spaces sort and an explicit agent-view sort read the grouped
+        // order, so skip the per-endpoint grouping pass when neither can.
+        let workspace_orders = if sort == crate::config::AgentPanelSortConfig::Priority
+            && view.is_none_or(|view| view.sort.is_empty())
+        {
+            HashMap::new()
+        } else {
+            grouped_workspace_orders(endpoints)
+        };
         let mut rows = cached_endpoint_snapshots(endpoints)
             .flat_map(|endpoint| {
+                let order = workspace_orders.get(&endpoint.endpoint_index);
                 endpoint
                     .snapshot
                     .agents
@@ -93,6 +106,9 @@ pub(super) fn aggregate_agent_rows<'a>(
                             .get(&agent.pane_id)
                             .copied()
                             .unwrap_or_default(),
+                        workspace_order: order
+                            .and_then(|order| order.get(agent.workspace_id.as_str()).copied())
+                            .map(|position| position as u64),
                         endpoint,
                         agent,
                     })
@@ -130,8 +146,14 @@ pub(super) fn aggregate_agent_rows<'a>(
         return rows;
     }
 
+    let workspace_orders = if sort == crate::config::AgentPanelSortConfig::Priority {
+        HashMap::new()
+    } else {
+        grouped_workspace_orders(endpoints)
+    };
     let mut rows = cached_endpoint_snapshots(endpoints)
         .flat_map(|endpoint| {
+            let order = workspace_orders.get(&endpoint.endpoint_index);
             super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
                 .into_iter()
                 .filter_map(move |pane_id| {
@@ -146,6 +168,9 @@ pub(super) fn aggregate_agent_rows<'a>(
                             .get(&pane_id)
                             .copied()
                             .unwrap_or_default(),
+                        workspace_order: order
+                            .and_then(|order| order.get(agent.workspace_id.as_str()).copied())
+                            .map(|position| position as u64),
                         endpoint,
                         agent,
                     })
@@ -168,7 +193,40 @@ fn sort_aggregate_rows(
                 std::cmp::Reverse(row.recency),
             )
         });
+    } else {
+        rows.sort_by_key(|row| row.workspace_order.unwrap_or(u64::MAX));
     }
+}
+
+/// Grouped workspace position (parent, children, standalone) matching the
+/// spaces panel, built once per endpoint that contributes agent rows. The fully
+/// expanded grouping keeps the order stable regardless of sidebar collapse
+/// state, and resolving it here keeps sorting off the per-comparison path.
+fn grouped_workspace_orders(
+    endpoints: &[ClientShellEndpoint],
+) -> HashMap<usize, HashMap<&str, usize>> {
+    let empty = HashSet::new();
+    endpoints
+        .iter()
+        .enumerate()
+        .filter_map(|(index, endpoint)| {
+            let snapshot = endpoint.snapshot.as_deref()?;
+            if snapshot.agents.is_empty() {
+                return None;
+            }
+            let order = super::render::workspace_entries(snapshot, &empty)
+                .into_iter()
+                .enumerate()
+                .filter_map(|(position, entry)| {
+                    snapshot
+                        .workspaces
+                        .get(entry.index)
+                        .map(|workspace| (workspace.workspace_id.as_str(), position))
+                })
+                .collect();
+            Some((index, order))
+        })
+        .collect()
 }
 
 struct ClientAgentViewEntry<'a> {
@@ -176,6 +234,7 @@ struct ClientAgentViewEntry<'a> {
     snapshot: &'a ClientShellSnapshot,
     agent: &'a ClientShellAgent,
     seen: bool,
+    workspace_order: Option<u64>,
 }
 
 impl<'a> ClientAgentViewEntry<'a> {
@@ -185,6 +244,7 @@ impl<'a> ClientAgentViewEntry<'a> {
             snapshot: row.endpoint.snapshot,
             agent: row.agent,
             seen: row.endpoint.agent_presentation.seen(row.agent),
+            workspace_order: row.workspace_order,
         }
     }
 }
@@ -231,11 +291,7 @@ impl crate::agent_view_eval::AgentViewEntry for ClientAgentViewEntry<'_> {
     }
 
     fn workspace_order(&self) -> Option<u64> {
-        self.snapshot
-            .workspaces
-            .iter()
-            .position(|workspace| workspace.workspace_id == self.agent.workspace_id)
-            .map(|index| index as u64)
+        self.workspace_order
     }
 
     fn tab_order(&self) -> Option<u64> {
