@@ -981,6 +981,18 @@
           "description": "Ask for a workspace name before interactive TUI creation."
         },
         {
+          "key": "ui.navigator_start_expanded",
+          "type": "boolean",
+          "default": "true",
+          "description": "Open the session navigator with every workspace expanded, showing its panes. Set false to start on workspace rows only."
+        },
+        {
+          "key": "ui.navigator_start_search_focused",
+          "type": "boolean",
+          "default": "false",
+          "description": "Open the session navigator with the search field focused."
+        },
+        {
           "key": "ui.pane_borders",
           "type": "enum",
           "default": "\"auto\"",

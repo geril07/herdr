@@ -306,6 +306,18 @@ pub(super) fn navigator_rows(
         let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
         let mut endpoint_rows = Vec::new();
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
+            // Scope the collapse set to this endpoint once so the per-workspace
+            // lookup below is a borrowed str hash instead of an allocating tuple.
+            let collapsed: HashSet<&str> = if navigator.collapsed_workspaces.is_empty() {
+                HashSet::new()
+            } else {
+                navigator
+                    .collapsed_workspaces
+                    .iter()
+                    .filter(|(id, _)| id == &endpoint.endpoint_id)
+                    .map(|(_, workspace_id)| workspace_id.as_str())
+                    .collect()
+            };
             let agents = snapshot
                 .agents
                 .iter()
@@ -332,11 +344,18 @@ pub(super) fn navigator_rows(
                 let workspace_matches = endpoint_query_matches
                     || text(&workspace.label)
                     || workspace.branch.as_deref().is_some_and(text);
+                let expanded = !collapsed.contains(workspace.workspace_id.as_str());
+                // A collapsed workspace builds no child rows at all, so its panes
+                // cannot be reached by the search filter and no row work is wasted.
                 let mut children = Vec::new();
-                let workspace_tabs = tabs_by_workspace
-                    .get(workspace.workspace_id.as_str())
-                    .map(Vec::as_slice)
-                    .unwrap_or_default();
+                let workspace_tabs = if expanded {
+                    tabs_by_workspace
+                        .get(workspace.workspace_id.as_str())
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                } else {
+                    &[]
+                };
                 let multiple_tabs = workspace_tabs.len() > 1;
                 for tab in workspace_tabs {
                     let tab_matches = workspace_matches || text(&tab.label);
