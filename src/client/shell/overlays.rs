@@ -722,19 +722,9 @@ fn render_navigator_overlay(
     indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let a = b.area;
-    let width = a.width.saturating_sub(4).min(116);
-    let height = a.height.saturating_sub(2).min(42);
-    if width < 4 || height < 9 {
-        return None;
-    }
-    let q = Rect::new(
-        a.x + (a.width - width) / 2,
-        a.y + (a.height - height) / 2,
-        width,
-        height,
-    )
-    .intersection(a);
+    // Compact popup: fixed width, height proportional to the terminal and
+    // clamped, so the navigator stays short on small terminals.
+    let q = popup(b.area, 84, (b.area.height * 75 / 100).clamp(16, 26))?.intersection(b.area);
     let i = panel(b, q, p.accent, p.panel_bg)?;
     put_text(
         b,
@@ -1078,15 +1068,9 @@ fn render_agent_picker_overlay(
     indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let a = b.area;
-    let mx = (a.width / 16).max(2);
-    let my = (a.height / 10).max(1);
-    let q = Rect::new(
-        a.x + mx,
-        a.y + my,
-        a.width.saturating_sub(mx * 2).max(4),
-        a.height.saturating_sub(my * 2).max(4),
-    );
+    // Compact popup: narrower and shorter than the navigator, since it lists
+    // agents rather than the whole tree.
+    let q = popup(b.area, 76, (b.area.height * 65 / 100).clamp(14, 22))?;
     let i = panel(b, q, p.accent, p.panel_bg)?;
     let rows =
         super::aggregate_navigation::agent_picker_rows(endpoints, active_endpoint_id, sort, picker);
