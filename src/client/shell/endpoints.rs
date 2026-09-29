@@ -22,6 +22,8 @@ pub(crate) struct ClientShellEndpoint {
     pending_agent_view_projection: Option<ClientEndpointAgentViewProjection>,
     pub(crate) agent_view_projection_supported: bool,
     pub(crate) methods: Option<HashSet<String>>,
+    /// Memo for the grouped orderings this endpoint's surfaces draw.
+    pub(super) workspace_entries: super::workspace_entries::EndpointWorkspaceEntries,
 }
 
 pub(super) struct MachineHit {
@@ -83,6 +85,9 @@ impl ClientShellState {
                 agent_view_projection_supported: previous
                     .is_some_and(|endpoint| endpoint.agent_view_projection_supported),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
+                workspace_entries: previous.map_or_else(Default::default, |endpoint| {
+                    endpoint.workspace_entries.clone()
+                }),
             });
         }
 
@@ -539,6 +544,42 @@ impl ClientShellState {
         self.cache_endpoint_snapshot_with_surface(endpoint_id, Some(generation), snapshot, false);
     }
 
+    /// Rebuild the grouped orderings whose inputs changed since the last pass.
+    ///
+    /// Run once per frame and once per input batch so the render path and
+    /// navigation read memos instead of rebuilding them. Readers still compare
+    /// the inputs themselves, so a pass that never runs costs a recompute rather
+    /// than a wrong ordering.
+    pub(super) fn refresh_workspace_entries(&mut self) {
+        let empty_collapsed_groups = HashSet::new();
+        let active = self
+            .endpoints
+            .iter()
+            .position(|endpoint| endpoint.endpoint_id == self.active_endpoint_id);
+        for (index, endpoint) in self.endpoints.iter_mut().enumerate() {
+            // The active sidebar draws the active projection, which is the
+            // endpoint snapshot except while the endpoint is being retired.
+            let snapshot = if Some(index) == active {
+                self.snapshot.as_deref()
+            } else {
+                endpoint.snapshot.as_deref()
+            };
+            let Some(snapshot) = snapshot else {
+                continue;
+            };
+            let collapsed_groups = if endpoint.endpoint_id.is_local() {
+                &self.collapsed_groups
+            } else {
+                self.remote_collapsed_groups
+                    .get(&endpoint.endpoint_id)
+                    .unwrap_or(&empty_collapsed_groups)
+            };
+            endpoint
+                .workspace_entries
+                .refresh(snapshot, collapsed_groups);
+        }
+    }
+
     fn cache_endpoint_snapshot_with_surface(
         &mut self,
         endpoint_id: &ClientEndpointId,
@@ -741,5 +782,6 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         pending_agent_view_projection: None,
         agent_view_projection_supported: false,
         methods: None,
+        workspace_entries: Default::default(),
     }
 }

@@ -93,11 +93,19 @@ impl ClientShellState {
             workspace_drop_indicator_row: None,
         };
         if let Some(snapshot) = local_snapshot {
+            let orderings = workspace_entries::active_workspace_orderings(
+                &self.endpoints,
+                &self.active_endpoint_id,
+                &self.collapsed_groups,
+                snapshot,
+            );
             render::render_sidebar(
                 &mut buffer,
                 sidebar,
                 snapshot,
                 &self.config,
+                &orderings.collapsed,
+                &orderings.expanded,
                 &mut render_state,
                 &mut self.hits,
             );
@@ -166,6 +174,7 @@ impl ClientShellState {
         cols: u16,
         rows: u16,
     ) -> Option<crate::client::frame_output::ComposedFrame> {
+        self.refresh_workspace_entries();
         self.last_composed_at = Some(std::time::Instant::now());
         self.selection_repaint_deadline = None;
         if self.last_composed_size != Some((cols, rows)) && self.mode == ClientShellMode::Navigate {

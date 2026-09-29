@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 mod actions;
@@ -37,6 +38,7 @@ mod state;
 mod surface_patch;
 mod text_editor;
 mod word_selection;
+mod workspace_entries;
 mod worktrees;
 use text_editor::TextEditor;
 use word_selection::ClientWordSelection;

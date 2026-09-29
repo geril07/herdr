@@ -12,6 +12,8 @@ pub(super) struct CachedEndpointSnapshot<'a> {
     pub(super) snapshot: &'a ClientShellSnapshot,
     pub(super) agent_recency: &'a HashMap<String, u64>,
     pub(super) agent_presentation: &'a super::endpoint_agent_state::EndpointAgentPresentation,
+    /// The endpoint owning this snapshot, so grouped orderings come from its memo.
+    pub(super) endpoint: &'a ClientShellEndpoint,
 }
 
 impl CachedEndpointSnapshot<'_> {
@@ -38,6 +40,7 @@ pub(super) fn cached_endpoint_snapshots(
                     snapshot,
                     agent_recency: &endpoint.agent_recency,
                     agent_presentation: &endpoint.agent_presentation,
+                    endpoint,
                 })
         })
 }
@@ -154,27 +157,33 @@ pub(super) fn aggregate_agent_rows<'a>(
     let mut rows = cached_endpoint_snapshots(endpoints)
         .flat_map(|endpoint| {
             let order = workspace_orders.get(&endpoint.endpoint_index);
-            super::agent_sidebar::ordered_agent_pane_ids(endpoint.snapshot, sort)
-                .into_iter()
-                .filter_map(move |pane_id| {
-                    let agent = endpoint
-                        .snapshot
-                        .agents
-                        .iter()
-                        .find(|agent| agent.pane_id == pane_id)?;
-                    Some(AggregateAgentRow {
-                        recency: endpoint
-                            .agent_recency
-                            .get(&pane_id)
-                            .copied()
-                            .unwrap_or_default(),
-                        workspace_order: order
-                            .and_then(|order| order.get(agent.workspace_id.as_str()).copied())
-                            .map(|position| position as u64),
-                        endpoint,
-                        agent,
-                    })
+            super::agent_sidebar::ordered_agent_pane_ids(
+                endpoint.snapshot,
+                sort,
+                &endpoint
+                    .endpoint
+                    .expanded_workspace_entries(endpoint.snapshot),
+            )
+            .into_iter()
+            .filter_map(move |pane_id| {
+                let agent = endpoint
+                    .snapshot
+                    .agents
+                    .iter()
+                    .find(|agent| agent.pane_id == pane_id)?;
+                Some(AggregateAgentRow {
+                    recency: endpoint
+                        .agent_recency
+                        .get(&pane_id)
+                        .copied()
+                        .unwrap_or_default(),
+                    workspace_order: order
+                        .and_then(|order| order.get(agent.workspace_id.as_str()).copied())
+                        .map(|position| position as u64),
+                    endpoint,
+                    agent,
                 })
+            })
         })
         .collect::<Vec<_>>();
     sort_aggregate_rows(&mut rows, sort);
@@ -205,7 +214,6 @@ fn sort_aggregate_rows(
 fn grouped_workspace_orders(
     endpoints: &[ClientShellEndpoint],
 ) -> HashMap<usize, HashMap<&str, usize>> {
-    let empty = HashSet::new();
     endpoints
         .iter()
         .enumerate()
@@ -214,16 +222,10 @@ fn grouped_workspace_orders(
             if snapshot.agents.is_empty() {
                 return None;
             }
-            let order = super::render::workspace_entries(snapshot, &empty)
-                .into_iter()
-                .enumerate()
-                .filter_map(|(position, entry)| {
-                    snapshot
-                        .workspaces
-                        .get(entry.index)
-                        .map(|workspace| (workspace.workspace_id.as_str(), position))
-                })
-                .collect();
+            let order = super::agent_sidebar::grouped_workspace_order(
+                snapshot,
+                &endpoint.expanded_workspace_entries(snapshot),
+            );
             Some((index, order))
         })
         .collect()
@@ -358,6 +360,10 @@ pub(super) fn navigator_rows(
     let mut rows = Vec::new();
 
     for endpoint in endpoints {
+        let expanded_ordered = endpoint
+            .snapshot
+            .as_deref()
+            .map(|snapshot| endpoint.expanded_workspace_entries(snapshot));
         let stale = endpoint.status != ClientEndpointStatus::Online;
         let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
         let mut endpoint_rows = Vec::new();
@@ -399,8 +405,7 @@ pub(super) fn navigator_rows(
             // Grouped workspace order (parent, children, standalone) matching the
             // spaces panel. Fully expanded grouping so the order stays stable
             // regardless of sidebar collapse state.
-            let empty_collapsed_groups = HashSet::new();
-            let ordered = super::render::workspace_entries(snapshot, &empty_collapsed_groups);
+            let ordered = expanded_ordered.as_deref().unwrap_or_default();
             for entry in ordered {
                 let Some(workspace) = snapshot.workspaces.get(entry.index) else {
                     continue;

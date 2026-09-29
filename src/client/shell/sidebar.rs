@@ -60,6 +60,8 @@ pub(crate) fn render_collapsed_sidebar(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     collapsed_groups: &HashSet<String>,
+    collapsed_entries: &[WorkspaceEntry],
+    expanded_entries: &[WorkspaceEntry],
     selected_workspace_id: Option<&str>,
     selected_agent_pane_id: Option<&str>,
     hits: &mut ShellHitMap,
@@ -72,7 +74,7 @@ pub(crate) fn render_collapsed_sidebar(
     let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area, on_right);
     // The compact rail draws the same grouped order as the expanded sidebar so
     // row numbers and digit shortcuts address the same workspace.
-    let entries = workspace_entries(snapshot, collapsed_groups);
+    let entries = collapsed_entries;
     for (position, entry) in entries
         .iter()
         .take(workspace_area.height as usize)
@@ -150,10 +152,11 @@ pub(crate) fn render_collapsed_sidebar(
         detail_area.width,
         detail_area.height.saturating_sub(1),
     );
-    for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
-        .into_iter()
-        .take(detail_content.height as usize)
-        .enumerate()
+    for (index, pane_id) in
+        super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort, expanded_entries)
+            .into_iter()
+            .take(detail_content.height as usize)
+            .enumerate()
     {
         let Some(agent) = snapshot
             .agents
@@ -231,6 +234,8 @@ pub(crate) fn render_sidebar(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
+    collapsed_entries: &[WorkspaceEntry],
+    expanded_entries: &[WorkspaceEntry],
     state: &mut ShellRenderState<'_>,
     hits: &mut ShellHitMap,
 ) {
@@ -259,7 +264,7 @@ pub(crate) fn render_sidebar(
             .add_modifier(Modifier::BOLD),
     );
 
-    let entries = workspace_entries(snapshot, state.collapsed_groups);
+    let entries = collapsed_entries;
     let body = Rect::new(
         workspace_area.x,
         workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
@@ -477,6 +482,7 @@ pub(crate) fn render_sidebar(
         config,
         state.agent_scroll,
         state.selected_agent.map(|target| target.pane_id.as_str()),
+        expanded_entries,
         hits,
     );
 
@@ -503,95 +509,6 @@ pub(crate) fn render_sidebar(
         if on_right { "»" } else { "«" },
         Style::default().fg(palette.overlay0),
     );
-}
-
-pub(crate) fn workspace_entries(
-    snapshot: &ClientShellSnapshot,
-    collapsed_groups: &HashSet<String>,
-) -> Vec<WorkspaceEntry> {
-    let mut members = HashMap::<&str, Vec<usize>>::new();
-    for (index, workspace) in snapshot.workspaces.iter().enumerate() {
-        if let Some(worktree) = &workspace.worktree {
-            members.entry(&worktree.key).or_default().push(index);
-        }
-    }
-    let grouped = members
-        .iter()
-        .filter(|(_, indices)| {
-            indices.len() >= 2
-                && indices.iter().any(|index| {
-                    snapshot.workspaces[*index]
-                        .worktree
-                        .as_ref()
-                        .is_some_and(|worktree| !worktree.is_linked_worktree)
-                })
-        })
-        .map(|(key, _)| *key)
-        .collect::<HashSet<_>>();
-    let mut emitted = HashSet::<&str>::new();
-    let mut entries = Vec::new();
-    for (index, workspace) in snapshot.workspaces.iter().enumerate() {
-        let Some(worktree) = workspace
-            .worktree
-            .as_ref()
-            .filter(|worktree| grouped.contains(worktree.key.as_str()))
-        else {
-            entries.push(WorkspaceEntry {
-                index,
-                indented: false,
-                last_child: false,
-            });
-            continue;
-        };
-        if !emitted.insert(&worktree.key) {
-            continue;
-        }
-        let Some(group_members) = members.get(worktree.key.as_str()) else {
-            continue;
-        };
-        let parent = group_members
-            .iter()
-            .copied()
-            .find(|member| {
-                snapshot.workspaces[*member]
-                    .worktree
-                    .as_ref()
-                    .is_some_and(|worktree| !worktree.is_linked_worktree)
-            })
-            .unwrap_or(index);
-        entries.push(WorkspaceEntry {
-            index: parent,
-            indented: false,
-            last_child: false,
-        });
-        if collapsed_groups.contains(&worktree.key) {
-            if let Some(active) = group_members
-                .iter()
-                .copied()
-                .find(|member| *member != parent && snapshot.workspaces[*member].focused)
-            {
-                entries.push(WorkspaceEntry {
-                    index: active,
-                    indented: true,
-                    last_child: true,
-                });
-            }
-            continue;
-        }
-        let children = group_members
-            .iter()
-            .copied()
-            .filter(|member| *member != parent)
-            .collect::<Vec<_>>();
-        for (child_index, child) in children.iter().enumerate() {
-            entries.push(WorkspaceEntry {
-                index: *child,
-                indented: true,
-                last_child: child_index + 1 == children.len(),
-            });
-        }
-    }
-    entries
 }
 
 fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<String> {
