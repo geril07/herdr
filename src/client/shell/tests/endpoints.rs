@@ -3433,6 +3433,26 @@ fn agent_picker_keybind_opens_overlay() {
 }
 
 #[test]
+fn agent_picker_uses_compact_popup_geometry() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_agent_picker_overlay();
+
+    // The picker is a compact popup: 76 columns, height proportional to the
+    // terminal and clamped to 14..=22. Asserted so the geometry cannot silently
+    // regress to the full-area margin sizing.
+    state.compose(160, 48).expect("agent picker");
+    let popup = state.hits.agent_picker_popup;
+    assert_eq!(popup.width, 76);
+    assert_eq!(popup.height, 22);
+    assert!(
+        popup.x > 0 && popup.y > 0,
+        "compact popup should be inset, got {popup:?}"
+    );
+}
+
+#[test]
 fn agent_picker_selection_moves_with_jk_and_ctrl_np() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let mut snap = snapshot();
