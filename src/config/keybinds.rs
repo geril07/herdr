@@ -308,7 +308,6 @@ pub struct CustomCommandKeybind {
 pub struct NavigateKeybinds {
     pub workspace_up: ActionKeybinds,
     pub workspace_down: ActionKeybinds,
-    pub workspace_open: ActionKeybinds,
     pub pane_left: ActionKeybinds,
     pub pane_down: ActionKeybinds,
     pub pane_up: ActionKeybinds,
@@ -328,10 +327,7 @@ pub struct Keybinds {
     pub rename_workspace: ActionKeybinds,
     pub close_workspace: ActionKeybinds,
     pub workspace_picker: ActionKeybinds,
-    pub agent_picker: ActionKeybinds,
-    pub agent_navigation: ActionKeybinds,
     pub goto: ActionKeybinds,
-    pub confirm_accept: ActionKeybinds,
     pub detach: ActionKeybinds,
     pub reload_config: ActionKeybinds,
     pub open_notification_target: ActionKeybinds,
@@ -474,10 +470,6 @@ impl Config {
         let mut navigate_registry = BindingRegistry::new(prefix, prefix_source);
         navigate_registry.reserve_direct(prefix, "keys.prefix", prefix_source);
         reserve_navigate_runtime_keys(&mut navigate_registry);
-        // Confirmation dialogs are modal like navigate mode: the alias key is only
-        // active while the dialog is open, so plain keys such as "y" are safe here.
-        let mut dialog_registry = BindingRegistry::new(prefix, prefix_source);
-        dialog_registry.reserve_direct(prefix, "keys.prefix", prefix_source);
 
         macro_rules! empty_action {
             () => {
@@ -489,7 +481,6 @@ impl Config {
             navigate: NavigateKeybinds {
                 workspace_up: empty_action!(),
                 workspace_down: empty_action!(),
-                workspace_open: empty_action!(),
                 pane_left: empty_action!(),
                 pane_down: empty_action!(),
                 pane_up: empty_action!(),
@@ -504,10 +495,7 @@ impl Config {
             rename_workspace: empty_action!(),
             close_workspace: empty_action!(),
             workspace_picker: empty_action!(),
-            agent_picker: empty_action!(),
-            agent_navigation: empty_action!(),
             goto: empty_action!(),
-            confirm_accept: empty_action!(),
             detach: empty_action!(),
             reload_config: empty_action!(),
             open_notification_target: empty_action!(),
@@ -611,20 +599,6 @@ impl Config {
             };
         }
 
-        macro_rules! apply_dialog {
-            ($target:expr, $field:ident, $source:expr) => {
-                if field_source!($field) == $source {
-                    $target = parse_navigate_bindings(
-                        concat!("keys.", stringify!($field)),
-                        &self.keys.$field,
-                        &mut dialog_registry,
-                        &mut diagnostics,
-                        $source,
-                    );
-                }
-            };
-        }
-
         for source in [BindingSource::User, BindingSource::Default] {
             apply_navigate!(
                 keybinds.navigate.workspace_up,
@@ -634,11 +608,6 @@ impl Config {
             apply_navigate!(
                 keybinds.navigate.workspace_down,
                 navigate_workspace_down,
-                source
-            );
-            apply_navigate!(
-                keybinds.navigate.workspace_open,
-                navigate_workspace_open,
                 source
             );
             apply_navigate!(keybinds.navigate.pane_left, navigate_pane_left, source);
@@ -654,10 +623,7 @@ impl Config {
             apply_action!(keybinds.rename_workspace, rename_workspace, source);
             apply_action!(keybinds.close_workspace, close_workspace, source);
             apply_action!(keybinds.workspace_picker, workspace_picker, source);
-            apply_action!(keybinds.agent_picker, agent_picker, source);
-            apply_action!(keybinds.agent_navigation, agent_navigation, source);
             apply_action!(keybinds.goto, goto, source);
-            apply_dialog!(keybinds.confirm_accept, confirm_accept, source);
             apply_action!(keybinds.detach, detach, source);
             apply_action!(keybinds.reload_config, reload_config, source);
             apply_action!(
@@ -1368,14 +1334,7 @@ pub fn key_event_matches_combo(key: &KeyEvent, combo: KeyCombo) -> bool {
 }
 
 pub fn terminal_key_matches_combo(key: &TerminalKey, combo: KeyCombo) -> bool {
-    // Layout-independent `Ctrl`/`Super` shortcuts: `ctrl+ц` matches `ctrl+w`.
-    let normalized = key.clone().normalized_for_shortcut();
-    key_parts_match_combo(
-        normalized.code,
-        normalized.modifiers,
-        normalized.shifted_codepoint,
-        combo,
-    )
+    key_parts_match_combo(key.code, key.modifiers, key.shifted_codepoint, combo)
 }
 
 fn key_parts_match_combo(
@@ -1632,30 +1591,6 @@ next_tab = "prefix+n"
     }
 
     #[test]
-    fn agent_picker_defaults_to_prefix_shift_a() {
-        let kb = Config::default().keybinds();
-        assert_eq!(
-            binding_triggers(&kb.agent_picker),
-            vec![BindingTrigger::Prefix((
-                KeyCode::Char('a'),
-                KeyModifiers::SHIFT
-            ))]
-        );
-    }
-
-    #[test]
-    fn agent_navigation_defaults_to_prefix_a() {
-        let kb = Config::default().keybinds();
-        assert_eq!(
-            binding_triggers(&kb.agent_navigation),
-            vec![BindingTrigger::Prefix((
-                KeyCode::Char('a'),
-                KeyModifiers::empty()
-            ))]
-        );
-    }
-
-    #[test]
     fn goto_defaults_to_prefix_g() {
         let kb = Config::default().keybinds();
         assert_eq!(
@@ -1890,7 +1825,6 @@ help = "prefix+ctrl+b"
 [keys]
 navigate_workspace_up = "j"
 navigate_workspace_down = "j"
-navigate_workspace_open = "o"
 navigate_pane_down = "ctrl+j"
 "#,
         )
@@ -1905,75 +1839,12 @@ navigate_pane_down = "ctrl+j"
         assert!(keybinds.navigate.workspace_down.bindings.is_empty());
         assert!(keybinds
             .navigate
-            .workspace_open
-            .matches_direct_key(&TerminalKey::new(KeyCode::Char('o'), KeyModifiers::empty())));
-        assert!(keybinds
-            .navigate
             .pane_down
             .matches_direct_key(&TerminalKey::new(KeyCode::Char('j'), KeyModifiers::CONTROL)));
         assert!(diagnostics.iter().any(|diag| {
             diag.contains("kept keys.navigate_workspace_up")
                 && diag.contains("disabled keys.navigate_workspace_down")
         }));
-    }
-
-    #[test]
-    fn confirm_accept_is_unset_by_default_and_allows_plain_keys() {
-        let config: Config = toml::from_str("[keys]\n").unwrap();
-        assert!(config.keybinds().confirm_accept.bindings.is_empty());
-
-        let config: Config = toml::from_str(
-            r#"
-[keys]
-confirm_accept = ["y", "Y"]
-"#,
-        )
-        .unwrap();
-        let keybinds = config.keybinds();
-        assert_eq!(keybinds.confirm_accept.bindings.len(), 2);
-        assert!(keybinds
-            .confirm_accept
-            .matches_direct_key(&TerminalKey::new(KeyCode::Char('y'), KeyModifiers::empty())));
-        assert!(keybinds
-            .confirm_accept
-            .matches_direct_key(&TerminalKey::new(KeyCode::Char('Y'), KeyModifiers::empty())));
-    }
-
-    #[test]
-    fn confirm_accept_rejects_prefix_and_esc() {
-        let config: Config = toml::from_str(
-            r#"
-[keys]
-confirm_accept = ["prefix+y", "esc"]
-"#,
-        )
-        .unwrap();
-        let diagnostics = config.collect_diagnostics();
-        assert!(config.keybinds().confirm_accept.bindings.is_empty());
-        assert!(diagnostics
-            .iter()
-            .any(|diag| diag.contains("keys.confirm_accept")));
-    }
-
-    #[test]
-    fn ctrl_shortcuts_match_russian_layout_keys() {
-        let config: Config = toml::from_str(
-            r#"
-[keys]
-navigate_pane_down = "ctrl+j"
-"#,
-        )
-        .unwrap();
-        let keybinds = config.keybinds();
-
-        assert!(keybinds
-            .navigate
-            .pane_down
-            .matches_direct_key(&TerminalKey::new(KeyCode::Char('о'), KeyModifiers::CONTROL)));
-        assert!(!keybinds
-            .navigate
-            .pane_down
-            .matches_direct_key(&TerminalKey::new(KeyCode::Char('о'), KeyModifiers::empty())));
     }
 
     #[test]

@@ -148,8 +148,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # reload_config = "prefix+shift+r"
 # open_notification_target = "prefix+o"
 # workspace_picker = "prefix+w"
-# agent_navigation = "prefix+a"
-# agent_picker = "prefix+shift+a"
 # goto = "prefix+g"
 # new_workspace = "prefix+shift+n"
 # new_worktree = "prefix+shift+g"
@@ -196,16 +194,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
 # navigate_workspace_up = "up"
 # navigate_workspace_down = "down"
-# navigate_workspace_open = "o"  # Enter always opens the selected workspace
 # navigate_pane_left = "h"      # left arrow always focuses the pane to the left
 # navigate_pane_down = "j"
 # navigate_pane_up = "k"
 # navigate_pane_right = "l"     # right arrow always focuses the pane to the right
-
-# Confirmation dialogs. Enter always accepts, esc always cancels. This adds an
-# optional direct-key alias (e.g. "y" for tmux habit) for close workspace/tab/pane
-# and worktree remove dialogs. Unset by default; must not use prefix+ or esc.
-# confirm_accept = "y"
 
 # Custom commands use the same binding syntax.
 # type = "shell" runs detached in the background.
@@ -252,9 +244,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
 
-# Desktop sidebar placement: "left" or "right".
-# sidebar_position = "left"
-
 # Terminal width at or below which Herdr uses the mobile single-column layout.
 # Increase this for foldables, tablets, or wide phone terminals.
 # mobile_width_threshold = 64
@@ -289,26 +278,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Ask for confirmation before closing a workspace
 # confirm_close = true
 
-# Ask for confirmation before closing a pane
-# confirm_pane_close = true
-
-# Ask for confirmation before closing a tab
-# confirm_tab_close = true
-
 # Ask for a tab name before creating a new tab.
 # Set false to create tabs immediately with generated names.
 # prompt_new_tab_name = true
 
 # Ask for a workspace name before interactive creation.
 # prompt_new_workspace_name = false
-
-# Start the session navigator with all workspaces expanded.
-# Set false for a tmux-style sessions-only list; Space still expands one workspace.
-# navigator_start_expanded = true
-
-# Focus the session navigator search field on open.
-# Set true for fzf-style type-to-filter with Ctrl+n/Ctrl+p navigation.
-# navigator_start_search_focused = false
 
 # Draw borders around split panes.
 # "auto" draws them only for split panes, "always" also frames a lone pane
@@ -337,9 +312,6 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Desktop tab row placement: "top" or "bottom".
 # tab_bar_position = "top"
 
-# Show position numbers before custom-named desktop tabs.
-# tab_bar_numbers = false
-
 # Ordered status entries at the right edge of the desktop tab bar.
 # Supported types: zoom, hostname, datetime, text, and command.
 # Hostname, datetime, and command entries resolve on the Herdr server.
@@ -362,27 +334,19 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # distinct static glyphs for blocked, working, done, idle, and unknown states.
 # status_indicators = "dots"
 
-# Agent status indicators on tabs.
-# tab_status = true
-# tab_status_idle = true
-# tab_status_max = 3
-# tab_status_spacing = true
-# tab_status_order = "physical"
-
 # Accent color for highlights, borders, and navigation UI.
 # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
 # accent = "cyan"
 
-# Expanded agent rows. Built-ins are state_icon, state_text, state_elapsed, machine,
-# workspace, tab, pane, agent, terminal_title, and terminal_title_stripped.
-# state_elapsed shows time in the current status with minute precision.
+# Expanded agent rows. Built-ins are state_icon, state_text, machine, workspace, tab,
+# pane, agent, terminal_title, and terminal_title_stripped.
 # Custom values reported through pane metadata use a $name token.
 # A token occurrence may be styled with { token = "workspace", fg = "#89b4fa", bold = true, dim = false }.
 # Omitted style fields preserve the contextual default.
 # [ui.sidebar.agents]
 # Blank rows between agent entries. Set to 1 to restore the previous spacing.
 # row_gap = 0
-# rows = [["state_icon", "machine", "workspace", "tab"], ["agent", "state_elapsed"]]
+# rows = [["state_icon", "machine", "workspace", "tab"], ["agent"]]
 # Optional canonical agent IDs replace the default rows for matching agents.
 # [ui.sidebar.agents.rows_by_agent]
 # claude = [["state_icon", "machine", "workspace", "tab"], ["terminal_title_stripped"], ["agent"]]

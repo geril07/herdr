@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 mod actions;
-mod agent_navigation;
 mod agent_sidebar;
 mod aggregate_navigation;
 mod workspace_navigation;
-use agent_navigation::{AgentNavigationTarget, SidebarNavSection};
 use workspace_navigation::WorkspaceNavigationTarget;
 mod composition;
 mod config;
@@ -57,8 +55,8 @@ use unicode_width::UnicodeWidthStr;
 use super::endpoint::{ClientEndpointId, ClientEndpointStatus, SavedSshEndpoint};
 use crate::app::state::Palette;
 use crate::config::{
-    Config, LiveKeybindConfig, SidebarCollapsedModeConfig, SidebarPositionConfig,
-    SpacesSidebarConfig, TabBarPositionConfig,
+    Config, LiveKeybindConfig, SidebarCollapsedModeConfig, SpacesSidebarConfig,
+    TabBarPositionConfig,
 };
 use crate::protocol::{
     ClientMessage, ClientMousePosition, ClientPaneInputEvent, ClientShellSnapshot, ClientShellTab,
@@ -195,6 +193,10 @@ fn status_icon(
         (StatusIndicatorStyle::Symbols, AgentStatus::Idle) => "○",
         (StatusIndicatorStyle::Symbols, AgentStatus::Unknown) => "·",
     }
+}
+
+fn status_dot(status: crate::api::schema::AgentStatus) -> &'static str {
+    status_icon(status, crate::config::StatusIndicatorStyle::Dots)
 }
 
 fn status_priority(status: crate::api::schema::AgentStatus) -> u8 {

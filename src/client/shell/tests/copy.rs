@@ -813,7 +813,6 @@ fn copy_search_owns_prompt_repeat_highlights_selection_and_restore() {
 #[test]
 fn navigator_renders_connected_siblings_and_ancestor_lines() {
     let mut snapshot = snapshot();
-    snapshot.focused_workspace_id = None;
     snapshot.focused_pane_id = None;
     snapshot.tabs[0].label = "editor".into();
     snapshot.panes[0].label = Some("agent".into());
@@ -867,7 +866,7 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
             .map(|(rect, _)| {
                 frame.cells[rect.y as usize * frame.width as usize + rect.x as usize + 1..]
                     .iter()
-                    .take(10)
+                    .take(6)
                     .map(|cell| cell.symbol.as_str())
                     .collect::<String>()
             })
@@ -876,17 +875,17 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
     assert_eq!(
         prefixes(&mut state, 30),
         [
-            "▾   client",
-            "├──   edit",
-            "│  ├──   ·",
-            "│  └──   ·",
-            "├──   note",
-            "│  └──   ·",
-            "└──   logs",
-            "   └──   ·",
-            "▾   second",
-            "└──   last",
-            "   └──   ·"
+            "▾ clie",
+            "├── ed",
+            "│  ├──",
+            "│  └──",
+            "├── no",
+            "│  └──",
+            "└── lo",
+            "   └──",
+            "▾ seco",
+            "└── la",
+            "   └──"
         ]
     );
 
@@ -901,7 +900,7 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
     });
     assert_eq!(
         prefixes(&mut state, 12),
-        ["│  ├──   ·", "│  └──   ·", "├──   note", "│  └──   ·"]
+        ["│  ├──", "│  └──", "├── no", "│  └──"]
     );
 
     // Excluded siblings must not leave dangling continuation lines.
@@ -910,16 +909,13 @@ fn navigator_renders_connected_siblings_and_ancestor_lines() {
     };
     navigator.query = "shell".into();
     navigator.scroll = 0;
-    assert_eq!(
-        prefixes(&mut state, 30),
-        ["▾   client", "└──   edit", "   └──   ·"]
-    );
+    assert_eq!(prefixes(&mut state, 30), ["▾ clie", "└── ed", "   └──"]);
     let Some(ClientShellOverlay::Navigator(navigator)) = state.overlay.as_mut() else {
         panic!("expected navigator");
     };
     navigator.query.clear();
     navigator.expanded_workspaces.clear();
-    assert_eq!(prefixes(&mut state, 30), ["▸   client", "▸   second"]);
+    assert_eq!(prefixes(&mut state, 30), ["▸ clie", "▸ seco"]);
 }
 
 #[test]

@@ -20,7 +20,7 @@ impl ClientShellState {
                 self.persist_chrome_preferences(outcome);
             }
             crate::input::KeybindMatch::Action(action) => {
-                if self.navigation_preview_action_blocked()
+                if self.workspace_preview_action_blocked()
                     && matches!(
                         action,
                         crate::input::KeybindAction::RenameWorkspace
@@ -45,11 +45,6 @@ impl ClientShellState {
                 }
                 if action == crate::input::KeybindAction::OpenNavigator {
                     self.open_navigator_overlay();
-                    outcome.repaint = true;
-                    return;
-                }
-                if action == crate::input::KeybindAction::AgentPicker {
-                    self.open_agent_picker_overlay();
                     outcome.repaint = true;
                     return;
                 }
@@ -113,8 +108,7 @@ impl ClientShellState {
                 if action == crate::input::KeybindAction::CloseWorkspace {
                     if let Some(workspace_id) = self.workspace_action_id() {
                         if self.config.confirm_close {
-                            let endpoint_id = self.active_endpoint_id.clone();
-                            self.open_confirm_close_overlay(&endpoint_id, workspace_id);
+                            self.open_confirm_close_overlay(workspace_id);
                         } else {
                             self.push_endpoint_method(
                                 crate::api::schema::Method::WorkspaceClose(
@@ -122,48 +116,6 @@ impl ClientShellState {
                                         workspace_id,
                                         close_group: true,
                                     },
-                                ),
-                                outcome,
-                            );
-                        }
-                    }
-                    outcome.repaint = true;
-                    return;
-                }
-                if action == crate::input::KeybindAction::ClosePane {
-                    if let Some(pane_id) = self
-                        .snapshot
-                        .as_deref()
-                        .and_then(|snapshot| snapshot.focused_pane_id.clone())
-                    {
-                        if self.config.confirm_pane_close {
-                            let endpoint_id = self.active_endpoint_id.clone();
-                            self.open_confirm_pane_close_overlay(&endpoint_id, pane_id);
-                        } else {
-                            self.push_endpoint_method(
-                                crate::api::schema::Method::PaneClose(
-                                    crate::api::schema::PaneTarget { pane_id },
-                                ),
-                                outcome,
-                            );
-                        }
-                    }
-                    outcome.repaint = true;
-                    return;
-                }
-                if action == crate::input::KeybindAction::CloseTab {
-                    if let Some(tab_id) = self
-                        .snapshot
-                        .as_deref()
-                        .and_then(|snapshot| snapshot.focused_tab_id.clone())
-                    {
-                        if self.config.confirm_tab_close {
-                            let endpoint_id = self.active_endpoint_id.clone();
-                            self.open_confirm_tab_close_overlay(&endpoint_id, tab_id);
-                        } else {
-                            self.push_endpoint_method(
-                                crate::api::schema::Method::TabClose(
-                                    crate::api::schema::TabTarget { tab_id },
                                 ),
                                 outcome,
                             );
@@ -189,12 +141,11 @@ impl ClientShellState {
                     return;
                 }
                 if action == crate::input::KeybindAction::WorkspacePicker {
-                    self.enter_navigate_mode(SidebarNavSection::Spaces);
-                    outcome.repaint = true;
-                    return;
-                }
-                if action == crate::input::KeybindAction::AgentNavigation {
-                    self.enter_navigate_mode(SidebarNavSection::Agents);
+                    self.mobile_switcher_scroll = 0;
+                    self.reveal_mobile_workspace = false;
+                    self.mode = ClientShellMode::Navigate;
+                    self.navigate_workspace_id = self.focused_navigation_target();
+                    self.reveal_navigation_workspace = true;
                     outcome.repaint = true;
                     return;
                 }
@@ -398,38 +349,13 @@ impl ClientShellState {
         kind: PendingEndpointKind,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        let endpoint_id = self.active_endpoint_id.clone();
-        self.push_endpoint_method_to_with_kind(&endpoint_id, method, kind, outcome)
-    }
-
-    pub(super) fn push_endpoint_method_to(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        method: crate::api::schema::Method,
-        outcome: &mut ClientShellInput,
-    ) {
-        self.push_endpoint_method_to_with_kind(
-            endpoint_id,
-            method,
-            PendingEndpointKind::Generic,
-            outcome,
-        );
-    }
-
-    pub(super) fn push_endpoint_method_to_with_kind(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        method: crate::api::schema::Method,
-        kind: PendingEndpointKind,
-        outcome: &mut ClientShellInput,
-    ) -> bool {
-        if !self.endpoint_is_online(endpoint_id) {
-            let label = self.endpoint_label(endpoint_id).to_owned();
+        if !self.endpoint_is_online(&self.active_endpoint_id) {
+            let label = self.active_endpoint_label().to_owned();
             outcome.repaint |= self.receive_endpoint_unavailable(format!("{label} is not ready"));
             return false;
         }
         let method_name = crate::api::api_method_name(&method).to_owned();
-        if !self.supports_endpoint_method_for(endpoint_id, &method) {
+        if !self.supports_endpoint_method(&method) {
             outcome.repaint |= self.push_endpoint_notice(
                 ClientEndpointNoticeKind::Unsupported,
                 method_name.clone(),
@@ -440,47 +366,37 @@ impl ClientShellState {
             );
             return false;
         }
-        let Some(endpoint_snapshot) = self
-            .endpoints
-            .iter()
-            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
-            .and_then(|endpoint| endpoint.snapshot.as_deref())
-        else {
+        let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
         let confirmation_workspace_id = match &method {
-            crate::api::schema::Method::TabClose(target) => endpoint_snapshot
+            crate::api::schema::Method::TabClose(target) => snapshot
                 .tabs
                 .iter()
                 .find(|tab| tab.tab_id == target.tab_id)
                 .map(|tab| tab.workspace_id.clone()),
-            crate::api::schema::Method::PaneClose(target) => endpoint_snapshot
+            crate::api::schema::Method::PaneClose(target) => snapshot
                 .panes
                 .iter()
                 .find(|pane| pane.pane_id == target.pane_id)
                 .map(|pane| pane.workspace_id.clone()),
             _ => None,
         };
-        let confirmation_endpoint_id = confirmation_workspace_id
-            .as_ref()
-            .map(|_| endpoint_id.clone());
-        let boot_id = endpoint_snapshot.boot_id.clone();
         let request_id = self.next_request_id;
         self.next_request_id = self.next_request_id.saturating_add(1);
         let request_id = format!("client-shell:{request_id}");
         self.pending_requests.insert(
             request_id.clone(),
             PendingEndpointRequest {
-                boot_id: boot_id.clone(),
+                boot_id: snapshot.boot_id.clone(),
                 method_name,
                 confirmation_workspace_id,
-                confirmation_endpoint_id,
                 kind,
             },
         );
         outcome.actions.push(ClientShellAction::Endpoint {
-            endpoint_id: endpoint_id.clone(),
-            boot_id,
+            endpoint_id: self.active_endpoint_id.clone(),
+            boot_id: snapshot.boot_id.clone(),
             request: Box::new(crate::api::schema::Request {
                 id: request_id,
                 method,
@@ -891,10 +807,7 @@ impl ClientShellState {
                     && pending.confirmation_workspace_id.is_some() =>
             {
                 if let Some(workspace_id) = pending.confirmation_workspace_id {
-                    let endpoint_id = pending
-                        .confirmation_endpoint_id
-                        .unwrap_or_else(|| self.active_endpoint_id.clone());
-                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
+                    self.open_confirm_close_overlay(workspace_id);
                 }
                 true
             }
@@ -1106,6 +1019,12 @@ impl ClientShellState {
                     env: Default::default(),
                 }))
             }
+            KeybindAction::CloseTab => Some(Method::TabClose(TabTarget {
+                tab_id: focused_tab?,
+            })),
+            KeybindAction::ClosePane => Some(Method::PaneClose(PaneTarget {
+                pane_id: focused_pane.clone()?,
+            })),
             KeybindAction::CyclePaneNext | KeybindAction::CyclePanePrevious => {
                 let focused_tab = focused_tab?;
                 let panes = snapshot

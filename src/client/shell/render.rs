@@ -8,7 +8,6 @@ pub(in crate::client::shell) mod sidebar;
 mod tabs;
 
 pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel};
-pub(super) use super::aggregate_navigation::agent_picker_rows as client_agent_picker_rows;
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
 pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
@@ -18,14 +17,9 @@ pub(in crate::client::shell) fn render_sidebar_background(
     buffer: &mut Buffer,
     area: Rect,
     palette: &Palette,
-    on_right: bool,
 ) {
     buffer.set_style(area, Style::default().bg(palette.sidebar_bg));
-    let separator_x = if on_right {
-        area.x
-    } else {
-        area.right().saturating_sub(1)
-    };
+    let separator_x = area.right().saturating_sub(1);
     for y in area.y..area.bottom() {
         if let Some(cell) = buffer.cell_mut((separator_x, y)) {
             cell.set_symbol("│");
@@ -108,9 +102,9 @@ pub(super) fn render_mode_bar(
                     (" NAVIGATE ".to_owned(), mode_style),
                     (" esc back  ".to_owned(), base),
                     ("↑/↓".to_owned(), key),
-                    (" move  ".to_owned(), base),
+                    (" workspace  ".to_owned(), base),
                     ("tab".to_owned(), key),
-                    (" section  ".to_owned(), base),
+                    (" pane  ".to_owned(), base),
                     (prefix_rhs(&keybinds.keybinds.help), key),
                     (" keybinds".to_owned(), base),
                 ]);
@@ -250,7 +244,6 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) sidebar_section_split: f32,
     pub(super) tab_drag_insert_index: Option<usize>,
     pub(super) selected_workspace_id: Option<&'a WorkspaceNavigationTarget>,
-    pub(super) selected_agent: Option<&'a AgentNavigationTarget>,
     pub(super) reveal_navigation_workspace: &'a mut bool,
     pub(super) dragged_workspace_id: Option<&'a str>,
     pub(super) workspace_drop_indicator_row: Option<u16>,
@@ -299,11 +292,9 @@ pub(super) fn render_shell(
                 layout.sidebar,
                 snapshot,
                 config,
-                state.collapsed_groups,
                 state
                     .selected_workspace_id
                     .map(|target| target.workspace_id.as_str()),
-                state.selected_agent.map(|target| target.pane_id.as_str()),
                 &mut hits,
             );
         } else {

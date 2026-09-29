@@ -23,24 +23,6 @@ pub fn encode_terminal_key(key: TerminalKey, protocol: KeyboardProtocol) -> Vec<
         return Vec::new();
     }
 
-    // Layout-independent `Ctrl`/`Super` shortcuts: `ctrl+ц` must reach the pane
-    // as `ctrl+w` (and `ctrl+о` as `ctrl+j`/LF), using the Kitty base-layout key
-    // when reported, else the Russian fallback table. Plain typing is untouched.
-    // Normalized first so the Super preservation below encodes the Latin base.
-    let key = key.normalized_for_shortcut();
-
-    // Super has no legacy character encoding. Preserve the chord with CSI-u
-    // instead of leaking the unmodified character into the pane.
-    if matches!(protocol, KeyboardProtocol::Legacy)
-        && key.kind != crossterm::event::KeyEventKind::Release
-        && matches!(key.code, KeyCode::Char(_))
-        && key.modifiers.contains(KeyModifiers::SUPER)
-    {
-        if let Some(bytes) = try_encode_csi_u(&key, 0) {
-            return bytes;
-        }
-    }
-
     // REPORT_ALL_KEYS must retain physical press/repeat/release semantics instead of
     // reducing a native key to its layout-generated text.
     let preserve_physical_key = key.has_physical_identity() && protocol.reports_all_keys();
@@ -644,43 +626,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_ctrl_russian_word_erase_key() {
-        let key = KeyEvent::new(KeyCode::Char('ц'), KeyModifiers::CONTROL);
-        assert_eq!(encode_key(key, KeyboardProtocol::Legacy), vec![23]);
-    }
-
-    #[test]
-    fn legacy_ctrl_russian_newline_key_is_lf() {
-        let key = KeyEvent::new(KeyCode::Char('о'), KeyModifiers::CONTROL);
-        assert_eq!(encode_key(key, KeyboardProtocol::Legacy), b"\n");
-    }
-
-    #[test]
-    fn legacy_ctrl_russian_uses_reported_base_key() {
-        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::CONTROL)
-            .with_base_layout_codepoint('w' as u32);
-        assert_eq!(encode_terminal_key(key, KeyboardProtocol::Legacy), vec![23]);
-    }
-
-    #[test]
-    fn kitty_ctrl_russian_reports_latin_primary() {
-        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::CONTROL);
-        assert_eq!(
-            encode_terminal_key(key, KeyboardProtocol::Kitty { flags: 1 }),
-            b"\x1b[119;5u"
-        );
-    }
-
-    #[test]
-    fn plain_russian_typing_is_untouched() {
-        let key = TerminalKey::new(KeyCode::Char('ц'), KeyModifiers::empty());
-        assert_eq!(
-            encode_terminal_key(key, KeyboardProtocol::Legacy),
-            "ц".as_bytes()
-        );
-    }
-
-    #[test]
     fn legacy_shift_enter_is_just_cr() {
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
         assert_eq!(encode_key(key, KeyboardProtocol::Legacy), vec![b'\r']);
@@ -1248,19 +1193,6 @@ mod tests {
                 parse_terminal_key_sequence(std::str::from_utf8(&encoded).unwrap()).unwrap();
             assert_terminal_key_eq(parsed, key.code, key.modifiers, key.kind, None);
         }
-    }
-
-    #[test]
-    fn legacy_super_character_preserves_csi_u_chord() {
-        let sequence = "\x1b[99;9u";
-        let key = parse_terminal_key_sequence(sequence).expect("Super+C CSI-u key");
-
-        assert_eq!(key.code, KeyCode::Char('c'));
-        assert_eq!(key.modifiers, KeyModifiers::SUPER);
-        assert_eq!(
-            encode_terminal_key(key, KeyboardProtocol::Legacy),
-            sequence.as_bytes()
-        );
     }
 
     #[test]

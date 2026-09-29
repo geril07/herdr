@@ -127,14 +127,6 @@ impl StatusIndicatorStyle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum TabStatusOrderConfig {
-    #[default]
-    Physical,
-    Priority,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
     #[default]
     Auto,
@@ -359,18 +351,12 @@ pub struct KeysConfig {
     pub close_workspace: BindingConfig,
     /// Open the workspace navigation surface. Default: "prefix+w"
     pub workspace_picker: BindingConfig,
-    /// Open the agent picker. Default: "prefix+shift+a"
-    pub agent_picker: BindingConfig,
-    /// Open the agent navigation surface. Default: "prefix+a"
-    pub agent_navigation: BindingConfig,
     /// Open the session navigator. Default: "prefix+g"
     pub goto: BindingConfig,
     /// Move workspace selection up in navigate mode. Default: "up".
     pub navigate_workspace_up: BindingConfig,
     /// Move workspace selection down in navigate mode. Default: "down".
     pub navigate_workspace_down: BindingConfig,
-    /// Additional key to open the selected workspace in navigate mode. Enter always works.
-    pub navigate_workspace_open: BindingConfig,
     /// Focus the pane to the left in navigate mode. Default: "h". Left arrow is always an alias.
     pub navigate_pane_left: BindingConfig,
     /// Focus the pane below in navigate mode. Default: "j".
@@ -379,9 +365,6 @@ pub struct KeysConfig {
     pub navigate_pane_up: BindingConfig,
     /// Focus the pane to the right in navigate mode. Default: "l". Right arrow is always an alias.
     pub navigate_pane_right: BindingConfig,
-    /// Additional key to accept destructive confirmation dialogs (close workspace/tab/pane,
-    /// delete worktree checkout). Enter always accepts, Esc always cancels. Unset by default.
-    pub confirm_accept: BindingConfig,
     /// Detach the current client from its Herdr server. Default: "prefix+q".
     pub detach: BindingConfig,
     /// Reload config.toml in the running app/server. Default: "prefix+shift+r".
@@ -500,17 +483,11 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_picker: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    agent_picker: Option<BindingConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    agent_navigation: Option<BindingConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     goto: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_down: Option<BindingConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    navigate_workspace_open: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_pane_left: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -519,8 +496,6 @@ pub(crate) struct KeysConfigOverlay {
     navigate_pane_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_pane_right: Option<BindingConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    confirm_accept: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detach: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -644,17 +619,13 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(rename_workspace);
         apply_field!(close_workspace);
         apply_field!(workspace_picker);
-        apply_field!(agent_picker);
-        apply_field!(agent_navigation);
         apply_field!(goto);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
-        apply_field!(navigate_workspace_open);
         apply_field!(navigate_pane_left);
         apply_field!(navigate_pane_down);
         apply_field!(navigate_pane_up);
         apply_field!(navigate_pane_right);
-        apply_field!(confirm_accept);
         apply_field!(detach);
         apply_field!(reload_config);
         apply_field!(open_notification_target);
@@ -752,17 +723,13 @@ impl KeysConfig {
         copy_effective_action_field!(rename_workspace, keybinds.rename_workspace);
         copy_effective_action_field!(close_workspace, keybinds.close_workspace);
         copy_effective_action_field!(workspace_picker, keybinds.workspace_picker);
-        copy_effective_action_field!(agent_picker, keybinds.agent_picker);
-        copy_effective_action_field!(agent_navigation, keybinds.agent_navigation);
         copy_effective_action_field!(goto, keybinds.goto);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
-        copy_effective_action_field!(navigate_workspace_open, keybinds.navigate.workspace_open);
         copy_effective_action_field!(navigate_pane_left, keybinds.navigate.pane_left);
         copy_effective_action_field!(navigate_pane_down, keybinds.navigate.pane_down);
         copy_effective_action_field!(navigate_pane_up, keybinds.navigate.pane_up);
         copy_effective_action_field!(navigate_pane_right, keybinds.navigate.pane_right);
-        copy_effective_action_field!(confirm_accept, keybinds.confirm_accept);
         copy_effective_action_field!(detach, keybinds.detach);
         copy_effective_action_field!(reload_config, keybinds.reload_config);
         copy_effective_action_field!(open_notification_target, keybinds.open_notification_target);
@@ -877,14 +844,6 @@ pub enum TabBarPositionConfig {
     Bottom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum SidebarPositionConfig {
-    #[default]
-    Left,
-    Right,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneBordersConfig {
     #[default]
@@ -951,8 +910,6 @@ pub struct UiConfig {
     pub sidebar_start_collapsed: bool,
     /// Collapsed sidebar presentation. Default: compact.
     pub sidebar_collapsed_mode: SidebarCollapsedModeConfig,
-    /// Desktop sidebar placement. Default: left.
-    pub sidebar_position: SidebarPositionConfig,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
     pub mobile_width_threshold: u16,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
@@ -969,20 +926,10 @@ pub struct UiConfig {
     pub mouse_scroll_lines: Option<NonZeroUsize>,
     /// Ask for confirmation before closing a workspace. Default: true.
     pub confirm_close: bool,
-    /// Ask for confirmation before closing a pane. Default: true.
-    pub confirm_pane_close: bool,
-    /// Ask for confirmation before closing a tab. Default: true.
-    pub confirm_tab_close: bool,
     /// Ask for a tab name before creating a new tab. Default: true.
     pub prompt_new_tab_name: bool,
     /// Ask for a workspace name before interactive creation. Default: false.
     pub prompt_new_workspace_name: bool,
-    /// Start the session navigator with all workspaces expanded. Default: true.
-    /// Set false for a tmux-style sessions-only list; Space still expands one workspace.
-    pub navigator_start_expanded: bool,
-    /// Focus the session navigator search field on open. Default: false.
-    /// Set true for fzf-style type-to-filter with Ctrl+n/Ctrl+p navigation.
-    pub navigator_start_search_focused: bool,
     /// Draw borders around split panes. auto draws them only for split panes,
     /// always also frames a lone pane (only while pane_outer_borders is
     /// enabled, since every edge of a lone pane is an outer edge), off
@@ -1001,22 +948,10 @@ pub struct UiConfig {
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
     pub tab_bar_position: TabBarPositionConfig,
-    /// Show position numbers before custom-named desktop tabs. Default: false.
-    pub tab_bar_numbers: bool,
     /// Ordered entries shown at the right edge of the desktop tab row. Empty by default.
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
     /// Text inserted between visible right-side tab bar entries. Default: one space.
     pub tab_bar_right_separator: String,
-    /// Enable agent status indicators on tabs. Default: true.
-    pub tab_status: bool,
-    /// Show indicators for Idle agents. Default: true.
-    pub tab_status_idle: bool,
-    /// Maximum number of indicators per tab. Default: 3.
-    pub tab_status_max: usize,
-    /// Add space between multiple indicators. Default: true.
-    pub tab_status_spacing: bool,
-    /// Indicator order: "physical" or "priority". Default: "physical".
-    pub tab_status_order: TabStatusOrderConfig,
     /// Format for the outer terminal window title. Empty leaves the title alone.
     /// Default: "{hostname}: {workspace}".
     pub window_title: String,
@@ -1156,17 +1091,13 @@ impl Default for KeysConfig {
             rename_workspace: BindingConfig::one("prefix+shift+w"),
             close_workspace: BindingConfig::one("prefix+shift+d"),
             workspace_picker: BindingConfig::one("prefix+w"),
-            agent_picker: BindingConfig::one("prefix+shift+a"),
-            agent_navigation: BindingConfig::one("prefix+a"),
             goto: BindingConfig::one("prefix+g"),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
-            navigate_workspace_open: BindingConfig::empty(),
             navigate_pane_left: BindingConfig::one("h"),
             navigate_pane_down: BindingConfig::one("j"),
             navigate_pane_up: BindingConfig::one("k"),
             navigate_pane_right: BindingConfig::one("l"),
-            confirm_accept: BindingConfig::empty(),
             detach: BindingConfig::one("prefix+q"),
             reload_config: BindingConfig::one("prefix+shift+r"),
             open_notification_target: BindingConfig::one("prefix+o"),
@@ -1232,7 +1163,6 @@ impl Default for UiConfig {
             sidebar_max_width: 36,
             sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
-            sidebar_position: SidebarPositionConfig::Left,
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
             copy_on_select: true,
@@ -1241,12 +1171,8 @@ impl Default for UiConfig {
             redraw_on_focus_gained: true,
             mouse_scroll_lines: None,
             confirm_close: true,
-            confirm_pane_close: true,
-            confirm_tab_close: true,
             prompt_new_tab_name: true,
             prompt_new_workspace_name: false,
-            navigator_start_expanded: true,
-            navigator_start_search_focused: false,
             pane_borders: PaneBordersConfig::Auto,
             pane_outer_borders: true,
             pane_scrollbars: true,
@@ -1254,14 +1180,8 @@ impl Default for UiConfig {
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
-            tab_bar_numbers: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
-            tab_status: true,
-            tab_status_idle: true,
-            tab_status_max: 3,
-            tab_status_spacing: true,
-            tab_status_order: TabStatusOrderConfig::Physical,
             window_title: super::window_title::default_window_title(),
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             _legacy_agent_panel_scope: None,
@@ -1528,36 +1448,6 @@ status_indicators = "symbols"
     }
 
     #[test]
-    fn tab_status_defaults_and_parses() {
-        let default_config = Config::default();
-        assert!(default_config.ui.tab_status);
-        assert!(default_config.ui.tab_status_idle);
-        assert_eq!(default_config.ui.tab_status_max, 3);
-        assert!(default_config.ui.tab_status_spacing);
-        assert_eq!(
-            default_config.ui.tab_status_order,
-            TabStatusOrderConfig::Physical
-        );
-
-        let custom: Config = toml::from_str(
-            r#"
-[ui]
-tab_status = false
-tab_status_idle = false
-tab_status_max = 1
-tab_status_spacing = false
-tab_status_order = "priority"
-"#,
-        )
-        .unwrap();
-        assert!(!custom.ui.tab_status);
-        assert!(!custom.ui.tab_status_idle);
-        assert_eq!(custom.ui.tab_status_max, 1);
-        assert!(!custom.ui.tab_status_spacing);
-        assert_eq!(custom.ui.tab_status_order, TabStatusOrderConfig::Priority);
-    }
-
-    #[test]
     fn pane_borders_legacy_booleans_map_to_modes() {
         let enabled: Config = toml::from_str("[ui]\npane_borders = true").unwrap();
         assert_eq!(enabled.ui.pane_borders, PaneBordersConfig::Auto);
@@ -1595,7 +1485,6 @@ tab_status_order = "priority"
             default_config.ui.tab_bar_position,
             TabBarPositionConfig::Top
         );
-        assert!(!default_config.ui.tab_bar_numbers);
         assert!(default_config.ui.tab_bar_right.is_empty());
         assert_eq!(default_config.ui.tab_bar_right_separator, " ");
 
@@ -1608,7 +1497,6 @@ pane_gaps = true
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
-tab_bar_numbers = true
 tab_bar_right = [
   { type = "zoom" },
   { type = "hostname" },
@@ -1626,7 +1514,6 @@ tab_bar_right_separator = " · "
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
-        assert!(config.ui.tab_bar_numbers);
         assert_eq!(config.ui.tab_bar_right.len(), 5);
         assert!(matches!(
             config.ui.tab_bar_right[1],
@@ -1659,32 +1546,6 @@ prompt_new_tab_name = false
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.ui.prompt_new_tab_name);
-    }
-
-    #[test]
-    fn confirm_pane_close_defaults_on_and_parses() {
-        let default_config = Config::default();
-        assert!(default_config.ui.confirm_pane_close);
-
-        let toml = r#"
-[ui]
-confirm_pane_close = false
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(!config.ui.confirm_pane_close);
-    }
-
-    #[test]
-    fn confirm_tab_close_defaults_on_and_parses() {
-        let default_config = Config::default();
-        assert!(default_config.ui.confirm_tab_close);
-
-        let toml = r#"
-[ui]
-confirm_tab_close = false
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(!config.ui.confirm_tab_close);
     }
 
     #[test]
@@ -1801,22 +1662,6 @@ sidebar_start_collapsed = true
     }
 
     #[test]
-    fn navigator_start_presets_default_expanded_unfocused_and_parse() {
-        let default_config = Config::default();
-        assert!(default_config.ui.navigator_start_expanded);
-        assert!(!default_config.ui.navigator_start_search_focused);
-
-        let toml = r#"
-[ui]
-navigator_start_expanded = false
-navigator_start_search_focused = true
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert!(!config.ui.navigator_start_expanded);
-        assert!(config.ui.navigator_start_search_focused);
-    }
-
-    #[test]
     fn sidebar_collapsed_mode_defaults_compact_and_parses_hidden() {
         let default_config = Config::default();
         assert_eq!(
@@ -1833,22 +1678,6 @@ sidebar_collapsed_mode = "hidden"
             config.ui.sidebar_collapsed_mode,
             SidebarCollapsedModeConfig::Hidden
         );
-    }
-
-    #[test]
-    fn sidebar_position_defaults_left_and_parses_right() {
-        let default_config = Config::default();
-        assert_eq!(
-            default_config.ui.sidebar_position,
-            SidebarPositionConfig::Left
-        );
-
-        let toml = r#"
-[ui]
-sidebar_position = "right"
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.ui.sidebar_position, SidebarPositionConfig::Right);
     }
 
     #[test]

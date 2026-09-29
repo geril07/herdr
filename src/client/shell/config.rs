@@ -18,33 +18,12 @@ pub(super) fn merged_config_diagnostic(
 impl ClientShellState {
     pub(super) fn set_local_config_diagnostic(&mut self, diagnostic: Option<String>) {
         self.local_config_diagnostic = diagnostic;
-        self.refresh_config_diagnostic();
-    }
-
-    pub(super) fn refresh_config_diagnostic(&mut self) {
-        let merged = merged_config_diagnostic(
+        self.config_diagnostic = merged_config_diagnostic(
             self.local_config_diagnostic.as_deref(),
             self.snapshot
                 .as_deref()
                 .and_then(|snapshot| snapshot.config_diagnostic.as_deref()),
         );
-        if merged.is_none() {
-            self.dismissed_config_diagnostic = None;
-        }
-        // Dismiss is client-local: hide the exact text that was dismissed, show
-        // anything new. The server keeps reporting until the config is fixed.
-        self.config_diagnostic = match (&merged, &self.dismissed_config_diagnostic) {
-            (Some(merged), Some(dismissed)) if merged == dismissed => None,
-            _ => merged,
-        };
-    }
-
-    pub(crate) fn dismiss_config_diagnostic(&mut self, outcome: &mut ClientShellInput) {
-        if let Some(current) = self.config_diagnostic.take() {
-            self.dismissed_config_diagnostic = Some(current);
-            self.hits.config_diagnostic_dismiss = Rect::default();
-            outcome.repaint = true;
-        }
     }
 
     pub(super) fn persist_chrome_preferences(&mut self, outcome: &mut ClientShellInput) {
@@ -139,16 +118,9 @@ impl ClientShellConfig {
             sidebar_max_width: config.ui.sidebar_max_width,
             sidebar_start_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
-            sidebar_position: config.ui.sidebar_position,
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
-            tab_bar_numbers: config.ui.tab_bar_numbers,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
-            tab_status: config.ui.tab_status,
-            tab_status_idle: config.ui.tab_status_idle,
-            tab_status_max: config.ui.tab_status_max,
-            tab_status_spacing: config.ui.tab_status_spacing,
-            tab_status_order: config.ui.tab_status_order,
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -174,11 +146,7 @@ impl ClientShellConfig {
             keybinding_source: ClientShellKeybindingSource::Local,
             prompt_new_tab_name: config.ui.prompt_new_tab_name,
             prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
-            navigator_start_expanded: config.ui.navigator_start_expanded,
-            navigator_start_search_focused: config.ui.navigator_start_search_focused,
             confirm_close: config.ui.confirm_close,
-            confirm_pane_close: config.ui.confirm_pane_close,
-            confirm_tab_close: config.ui.confirm_tab_close,
             mouse_capture: config.ui.mouse_capture,
             mouse_scroll_lines: config.ui.mouse_scroll_lines(),
             right_click_passthrough_modifiers: config.ui.right_click_passthrough_modifiers(),
@@ -352,16 +320,9 @@ impl ClientShellConfig {
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
                 self.sidebar_collapsed_mode = ui.sidebar_collapsed_mode;
-                self.sidebar_position = ui.sidebar_position;
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
-                self.tab_bar_numbers = ui.tab_bar_numbers;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
-                self.tab_status = ui.tab_status;
-                self.tab_status_idle = ui.tab_status_idle;
-                self.tab_status_max = ui.tab_status_max;
-                self.tab_status_spacing = ui.tab_status_spacing;
-                self.tab_status_order = ui.tab_status_order;
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -375,11 +336,7 @@ impl ClientShellConfig {
                 self.clipboard_toast_position = ui.toast.clipboard.position;
                 self.prompt_new_tab_name = ui.prompt_new_tab_name;
                 self.prompt_new_workspace_name = ui.prompt_new_workspace_name;
-                self.navigator_start_expanded = ui.navigator_start_expanded;
-                self.navigator_start_search_focused = ui.navigator_start_search_focused;
                 self.confirm_close = ui.confirm_close;
-                self.confirm_pane_close = ui.confirm_pane_close;
-                self.confirm_tab_close = ui.confirm_tab_close;
                 self.mouse_capture = ui.mouse_capture;
                 self.mouse_scroll_lines = ui.mouse_scroll_lines();
                 self.right_click_passthrough_modifiers = ui.right_click_passthrough_modifiers();
@@ -398,10 +355,6 @@ impl ClientShellConfig {
         }
 
         diagnostics
-    }
-
-    pub(super) fn sidebar_on_right(&self) -> bool {
-        matches!(self.sidebar_position, SidebarPositionConfig::Right)
     }
 
     pub(super) fn layout(
@@ -436,12 +389,7 @@ impl ClientShellConfig {
             sidebar_width.clamp(min, max)
         }
         .min(cols.saturating_sub(1));
-        let main_width = cols.saturating_sub(sidebar_width);
-        let main = if self.sidebar_on_right() {
-            Rect::new(0, 0, main_width, rows)
-        } else {
-            Rect::new(sidebar_width, 0, main_width, rows)
-        };
+        let main = Rect::new(sidebar_width, 0, cols.saturating_sub(sidebar_width), rows);
         let show_tab_bar = rows > 1 && !(self.hide_tab_bar_when_single_tab && tab_count == 1);
         let tab_height = u16::from(show_tab_bar);
         let (tab_bar, pane_surface) = match self.tab_bar_position {
@@ -466,11 +414,7 @@ impl ClientShellConfig {
         };
 
         ClientShellLayout {
-            sidebar: if self.sidebar_on_right() {
-                Rect::new(cols.saturating_sub(sidebar_width), 0, sidebar_width, rows)
-            } else {
-                Rect::new(0, 0, sidebar_width, rows)
-            },
+            sidebar: Rect::new(0, 0, sidebar_width, rows),
             tab_bar,
             mobile_header: Rect::default(),
             pane_surface,
@@ -511,16 +455,9 @@ mod tests {
         let mut shell = ClientShellConfig::from_config(&Config::default());
         let mut next = Config::default();
         next.ui.sidebar_width = 31;
-        next.ui.sidebar_position = SidebarPositionConfig::Right;
         next.ui.tab_bar_position = TabBarPositionConfig::Bottom;
-        next.ui.tab_bar_numbers = true;
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
-        next.ui.tab_status = false;
-        next.ui.tab_status_idle = false;
-        next.ui.tab_status_max = 5;
-        next.ui.tab_status_spacing = false;
-        next.ui.tab_status_order = crate::config::TabStatusOrderConfig::Priority;
         next.ui.sidebar.agents = toml::from_str("rows = [[{ token = 'machine', rules = [{ equals = 'Local', bold = true }] }]]\nrow_gap = 2").unwrap();
         next.keys.prefix = "ctrl+a".to_owned();
 
@@ -528,10 +465,7 @@ mod tests {
 
         assert!(diagnostics.is_empty());
         assert_eq!(shell.sidebar_width, 31);
-        assert_eq!(shell.sidebar_position, SidebarPositionConfig::Right);
-        assert!(shell.sidebar_on_right());
         assert_eq!(shell.tab_bar_position, TabBarPositionConfig::Bottom);
-        assert!(shell.tab_bar_numbers);
         assert_eq!(
             shell.agent_panel_sort,
             crate::config::AgentPanelSortConfig::Priority
@@ -539,14 +473,6 @@ mod tests {
         assert_eq!(
             shell.status_indicators,
             crate::config::StatusIndicatorStyle::Symbols
-        );
-        assert!(!shell.tab_status);
-        assert!(!shell.tab_status_idle);
-        assert_eq!(shell.tab_status_max, 5);
-        assert!(!shell.tab_status_spacing);
-        assert_eq!(
-            shell.tab_status_order,
-            crate::config::TabStatusOrderConfig::Priority
         );
         assert_eq!(shell.agents.row_gap, 2);
         assert_eq!(

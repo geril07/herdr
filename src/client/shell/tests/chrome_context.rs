@@ -1,32 +1,6 @@
 use super::*;
 
 #[test]
-fn sidebar_position_places_chrome_on_the_configured_edge() {
-    for (position, sidebar_x, pane_x, divider_x, toggle_glyph) in [
-        (crate::config::SidebarPositionConfig::Left, 0, 26, 25, "«"),
-        (crate::config::SidebarPositionConfig::Right, 80, 0, 80, "»"),
-    ] {
-        let mut base = Config::default();
-        base.ui.sidebar_position = position;
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&base));
-        state.set_snapshot(Box::new(snapshot()));
-        state.set_pane_surface(surface());
-        let frame = state.compose(106, 20).expect("composed frame");
-        let layout = state.layout(106, 20);
-        assert_eq!((layout.sidebar.x, layout.sidebar.width), (sidebar_x, 26));
-        assert_eq!(
-            (layout.pane_surface.x, layout.pane_surface.width),
-            (pane_x, 80)
-        );
-        assert_eq!(state.hits.sidebar_divider.x, divider_x);
-        let toggle = state.hits.sidebar_toggle;
-        let toggle_cell =
-            &frame.cells[usize::from(toggle.y) * usize::from(frame.width) + usize::from(toggle.x)];
-        assert_eq!(toggle_cell.symbol.as_str(), toggle_glyph);
-    }
-}
-
-#[test]
 fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
     let mut snapshot = snapshot();
     snapshot.tabs.extend((2..=8).map(|number| ClientShellTab {
@@ -219,119 +193,105 @@ fn focused_workspace_change_reveals_new_workspace_in_full_sidebar() {
 
 #[test]
 fn client_owned_sidebar_dividers_resize_live() {
-    for position in [
-        crate::config::SidebarPositionConfig::Left,
-        crate::config::SidebarPositionConfig::Right,
-    ] {
-        // Dragging the width divider toward the pane surface grows the sidebar
-        // on either side: rightward for a left sidebar, leftward for a right one.
-        let (drag_first, divider_first, drag_second, divider_second) = match position {
-            crate::config::SidebarPositionConfig::Left => (31, 31, 32, 32),
-            crate::config::SidebarPositionConfig::Right => (74, 74, 73, 73),
-        };
-        let mut base = Config::default();
-        base.ui.sidebar_position = position;
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&base));
-        state.set_snapshot(Box::new(snapshot()));
-        state.set_pane_surface(surface());
-        state.compose(106, 30).expect("expanded sidebar");
-        assert!(state.hits.machines.is_empty());
-        let workspace_body = state.hits.workspace_body;
-        let needless_scroll =
-            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::ScrollDown,
-                column: workspace_body.x,
-                row: workspace_body.y,
-                modifiers: KeyModifiers::empty(),
-            })]);
-        assert_eq!(state.hits.workspace_max_scroll, 0);
-        assert_eq!(state.workspace_scroll, 0);
-        assert!(!needless_scroll.repaint);
-        let width_divider = state.hits.sidebar_divider;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.compose(106, 30).expect("expanded sidebar");
+    assert!(state.hits.machines.is_empty());
+    let workspace_body = state.hits.workspace_body;
+    let needless_scroll =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: width_divider.x,
+            kind: MouseEventKind::ScrollDown,
+            column: workspace_body.x,
+            row: workspace_body.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert_eq!(state.hits.workspace_max_scroll, 0);
+    assert_eq!(state.workspace_scroll, 0);
+    assert!(!needless_scroll.repaint);
+    let width_divider = state.hits.sidebar_divider;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: width_divider.x,
+        row: width_divider.y + 2,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let resize =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 31,
             row: width_divider.y + 2,
             modifiers: KeyModifiers::empty(),
         })]);
-        let resize =
-            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Drag(MouseButton::Left),
-                column: drag_first,
-                row: width_divider.y + 2,
-                modifiers: KeyModifiers::empty(),
-            })]);
-        assert_eq!(state.sidebar_width, 32);
-        assert!(state.sidebar_width_manual);
-        assert!(resize.repaint);
-        assert!(resize.resize);
-        let waiting_frame = state.compose(106, 30).expect("waiting for resized surface");
-        let waiting_text: String = waiting_frame
-            .cells
-            .iter()
-            .map(|cell| cell.symbol.as_str())
-            .collect();
-        assert!(
-            waiting_text.contains(" spaces"),
-            "local sidebar must keep spaces while resizing: {waiting_text}"
-        );
-        assert!(!waiting_text.contains(" machines"));
-        assert!(!waiting_text.contains("Select a connected machine"));
-        assert!(!waiting_text.contains("LIVE"));
-        assert!(waiting_frame.cursor.is_none());
-        assert!(state.pane_surface.is_none());
-        assert!(state.hits.panes.is_empty());
-        assert!(state.hits.pane_splits.is_empty());
-        assert!(state.hits.machines.is_empty());
-        assert_eq!(state.hits.sidebar_divider.x, divider_first);
-        assert_eq!(state.hits.workspaces[0].workspace_id, "ws_1");
+    assert_eq!(state.sidebar_width, 32);
+    assert!(state.sidebar_width_manual);
+    assert!(resize.repaint);
+    assert!(resize.resize);
+    let waiting_frame = state.compose(106, 30).expect("waiting for resized surface");
+    let waiting_text: String = waiting_frame
+        .cells
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(
+        waiting_text.contains(" spaces"),
+        "local sidebar must keep spaces while resizing: {waiting_text}"
+    );
+    assert!(!waiting_text.contains(" machines"));
+    assert!(!waiting_text.contains("Select a connected machine"));
+    assert!(!waiting_text.contains("LIVE"));
+    assert!(waiting_frame.cursor.is_none());
+    assert!(state.pane_surface.is_none());
+    assert!(state.hits.panes.is_empty());
+    assert!(state.hits.pane_splits.is_empty());
+    assert!(state.hits.machines.is_empty());
+    assert_eq!(state.hits.sidebar_divider.x, 31);
+    assert_eq!(state.hits.workspaces[0].workspace_id, "ws_1");
 
-        let next_resize =
-            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Drag(MouseButton::Left),
-                column: drag_second,
-                row: width_divider.y + 2,
-                modifiers: KeyModifiers::empty(),
-            })]);
-        assert!(next_resize.resize);
-        state.compose(106, 30).expect("continued resize");
-        assert_eq!(state.hits.sidebar_divider.x, divider_second);
+    let next_resize =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Up(MouseButton::Left),
-            column: drag_second,
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 32,
             row: width_divider.y + 2,
             modifiers: KeyModifiers::empty(),
         })]);
-        assert!(state.chrome_drag.is_none());
+    assert!(next_resize.resize);
+    state.compose(106, 30).expect("continued resize");
+    assert_eq!(state.hits.sidebar_divider.x, 32);
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: 32,
+        row: width_divider.y + 2,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(state.chrome_drag.is_none());
 
-        state.set_pane_surface(surface());
-        let recovered_frame = state.compose(106, 30).expect("resized sidebar");
-        let recovered_text: String = recovered_frame
-            .cells
-            .iter()
-            .map(|cell| cell.symbol.as_str())
-            .collect();
-        assert!(recovered_text.contains(" spaces"));
-        assert!(recovered_text.contains("LIVE"));
-        assert!(!state.hits.panes.is_empty());
-        let section_divider = state.hits.sidebar_section_divider;
-        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: section_divider.x + 2,
-            row: section_divider.y,
-            modifiers: KeyModifiers::empty(),
-        })]);
-        let split =
-            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Drag(MouseButton::Left),
-                column: section_divider.x + 2,
-                row: 20,
-                modifiers: KeyModifiers::empty(),
-            })]);
-        assert!(state.sidebar_section_split > 0.6);
-        assert!(split.repaint);
-        assert!(!split.resize);
-    }
+    state.set_pane_surface(surface());
+    let recovered_frame = state.compose(106, 30).expect("resized sidebar");
+    let recovered_text: String = recovered_frame
+        .cells
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect();
+    assert!(recovered_text.contains(" spaces"));
+    assert!(recovered_text.contains("LIVE"));
+    assert!(!state.hits.panes.is_empty());
+    let section_divider = state.hits.sidebar_section_divider;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: section_divider.x + 2,
+        row: section_divider.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    let split = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: section_divider.x + 2,
+        row: 20,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(state.sidebar_section_split > 0.6);
+    assert!(split.repaint);
+    assert!(!split.resize);
 }
 
 #[test]
@@ -516,7 +476,6 @@ fn new_tab_overlay_owns_text_cursor_and_submits_public_api_request() {
 #[test]
 fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.confirm_pane_close = false;
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     let mut close = ClientShellInput::default();
@@ -563,358 +522,4 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
         crate::api::schema::Method::WorkspaceClose(params)
             if params.workspace_id == "ws_1" && params.close_group
     ));
-}
-
-#[test]
-fn pane_close_keybind_confirms_before_closing_when_enabled() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    assert!(state.config.confirm_pane_close);
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
-        &mut close,
-    );
-    assert!(close.actions.is_empty());
-    assert!(matches!(
-        state.overlay.as_ref(),
-        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-            target: ClientConfirmCloseTarget::Pane { pane_id, .. },
-            ..
-        })) if pane_id == "pane_1"
-    ));
-    let frame = state.compose(106, 20).expect("pane confirmation overlay");
-    let text = frame
-        .cells
-        .chunks(frame.width as usize)
-        .map(|row| {
-            row.iter()
-                .map(|cell| cell.symbol.as_str())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(text.contains("Close pane?"));
-    assert!(text.contains("pane_1"));
-
-    // Focus may move before confirming; the captured pane id still closes.
-    state.snapshot.as_mut().expect("snapshot").focused_pane_id = Some("pane_2".into());
-    let confirm = state.handle_input_bytes(b"\r");
-    let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
-        panic!("pane confirmation should use endpoint API");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
-    ));
-    assert!(state.overlay.is_none());
-}
-
-#[test]
-fn pane_close_keybind_cancel_keeps_pane() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
-        &mut close,
-    );
-    assert!(close.actions.is_empty());
-    assert!(matches!(
-        state.overlay,
-        Some(ClientShellOverlay::ConfirmClose(_))
-    ));
-    let cancel = state.handle_input_bytes(b"\x1b");
-    assert!(cancel.actions.is_empty());
-    assert!(state.overlay.is_none());
-}
-
-#[test]
-fn confirm_accept_alias_confirms_close_dialog() {
-    let config: Config = toml::from_str("[keys]\nconfirm_accept = \"y\"\n").unwrap();
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
-        &mut close,
-    );
-    assert!(matches!(
-        state.overlay,
-        Some(ClientShellOverlay::ConfirmClose(_))
-    ));
-    let frame = state.compose(106, 20).expect("pane confirmation overlay");
-    let text = frame
-        .cells
-        .chunks(frame.width as usize)
-        .map(|row| {
-            row.iter()
-                .map(|cell| cell.symbol.as_str())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        text.contains("/y confirm"),
-        "alias should be visible on the accept button"
-    );
-    let confirm = state.handle_input_bytes(b"y");
-    let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
-        panic!("pane confirmation alias should use endpoint API");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
-    ));
-    assert!(state.overlay.is_none());
-}
-
-#[test]
-fn confirm_dialog_ignores_y_without_alias() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
-        &mut close,
-    );
-    assert!(matches!(
-        state.overlay,
-        Some(ClientShellOverlay::ConfirmClose(_))
-    ));
-    let ignored = state.handle_input_bytes(b"y");
-    assert!(ignored.actions.is_empty());
-    assert!(matches!(
-        state.overlay,
-        Some(ClientShellOverlay::ConfirmClose(_))
-    ));
-}
-
-#[test]
-fn pane_close_keybind_closes_directly_when_disabled() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.confirm_pane_close = false;
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
-        &mut close,
-    );
-    assert!(state.overlay.is_none());
-    let [ClientShellAction::Endpoint { request, .. }] = &close.actions[..] else {
-        panic!("pane close should use endpoint API");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
-    ));
-}
-
-#[test]
-fn pane_context_menu_close_follows_pane_confirmation_setting() {
-    for confirm_pane_close in [true, false] {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-        state.config.confirm_pane_close = confirm_pane_close;
-        state.set_snapshot(Box::new(snapshot()));
-        state.set_pane_surface(surface());
-        state.compose(106, 20).expect("composed frame");
-        let pane = state.hits.panes[0].rect;
-        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Right),
-            column: pane.x + 1,
-            row: pane.y,
-            modifiers: KeyModifiers::empty(),
-        })]);
-        state.compose(106, 20).expect("pane context menu");
-        let close_index = match state.overlay.as_ref() {
-            Some(ClientShellOverlay::ContextMenu(menu)) => menu
-                .items()
-                .iter()
-                .position(|item| item.action == ClientContextMenuAction::ClosePane)
-                .expect("close pane item"),
-            _ => panic!("pane context menu"),
-        };
-        let close = state.hits.context_menu_rows[close_index].0;
-        let outcome =
-            state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: close.x + 1,
-                row: close.y,
-                modifiers: KeyModifiers::empty(),
-            })]);
-        if confirm_pane_close {
-            assert!(outcome.actions.is_empty());
-            assert!(matches!(
-                state.overlay.as_ref(),
-                Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-                    target: ClientConfirmCloseTarget::Pane { pane_id, .. },
-                    ..
-                })) if pane_id == "pane_1"
-            ));
-            let confirm = state.handle_input_bytes(b"\r");
-            let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
-                panic!("pane confirmation should use endpoint API");
-            };
-            assert!(matches!(
-                &request.method,
-                crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
-            ));
-        } else {
-            assert!(state.overlay.is_none());
-            let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
-                panic!("pane close should use endpoint API");
-            };
-            assert!(matches!(
-                &request.method,
-                crate::api::schema::Method::PaneClose(params) if params.pane_id == "pane_1"
-            ));
-        }
-    }
-}
-
-#[test]
-fn tab_close_keybind_confirms_before_closing_when_enabled() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    assert!(state.config.confirm_tab_close);
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CloseTab),
-        &mut close,
-    );
-    assert!(close.actions.is_empty());
-    assert!(matches!(
-        state.overlay.as_ref(),
-        Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-            target: ClientConfirmCloseTarget::Tab { tab_id, .. },
-            ..
-        })) if tab_id == "tab_1"
-    ));
-    let frame = state.compose(106, 20).expect("tab confirmation overlay");
-    let text = frame
-        .cells
-        .chunks(frame.width as usize)
-        .map(|row| {
-            row.iter()
-                .map(|cell| cell.symbol.as_str())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(text.contains("Close tab?"));
-    assert!(text.contains('1'));
-
-    // Focus may move before confirming; the captured tab id still closes.
-    state.snapshot.as_mut().expect("snapshot").focused_tab_id = Some("tab_2".into());
-    let confirm = state.handle_input_bytes(b"\r");
-    let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
-        panic!("tab confirmation should use endpoint API");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
-    ));
-    assert!(state.overlay.is_none());
-}
-
-#[test]
-fn tab_close_keybind_cancel_keeps_tab() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CloseTab),
-        &mut close,
-    );
-    assert!(close.actions.is_empty());
-    assert!(matches!(
-        state.overlay,
-        Some(ClientShellOverlay::ConfirmClose(_))
-    ));
-    let cancel = state.handle_input_bytes(b"\x1b");
-    assert!(cancel.actions.is_empty());
-    assert!(state.overlay.is_none());
-}
-
-#[test]
-fn tab_close_keybind_closes_directly_when_disabled() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.config.confirm_tab_close = false;
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-    let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::CloseTab),
-        &mut close,
-    );
-    assert!(state.overlay.is_none());
-    let [ClientShellAction::Endpoint { request, .. }] = &close.actions[..] else {
-        panic!("tab close should use endpoint API");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
-    ));
-}
-
-#[test]
-fn tab_context_menu_close_follows_tab_confirmation_setting() {
-    for confirm_tab_close in [true, false] {
-        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-        state.config.confirm_tab_close = confirm_tab_close;
-        state.set_snapshot(Box::new(snapshot()));
-        state.set_pane_surface(surface());
-        state.open_tab_context_menu("tab_1".into(), 0, 0);
-        let close_index = match state.overlay.as_ref() {
-            Some(ClientShellOverlay::ContextMenu(menu)) => menu
-                .items()
-                .iter()
-                .position(|item| item.action == ClientContextMenuAction::Close)
-                .expect("close tab item"),
-            _ => panic!("tab context menu"),
-        };
-        let mut outcome = ClientShellInput::default();
-        state.activate_context_menu_item(close_index, &mut outcome);
-        if confirm_tab_close {
-            assert!(matches!(
-                state.overlay.as_ref(),
-                Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-                    target: ClientConfirmCloseTarget::Tab { tab_id, .. },
-                    ..
-                })) if tab_id == "tab_1"
-            ));
-            let confirm = state.handle_input_bytes(b"\r");
-            let [ClientShellAction::Endpoint { request, .. }] = &confirm.actions[..] else {
-                panic!("tab confirmation should use endpoint API");
-            };
-            assert!(matches!(
-                &request.method,
-                crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
-            ));
-        } else {
-            assert!(state.overlay.is_none());
-        }
-        let [.., ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
-            panic!("tab context action should use endpoint API");
-        };
-        if confirm_tab_close {
-            // Confirming path only focuses; the close itself comes from the overlay.
-            assert!(matches!(
-                &request.method,
-                crate::api::schema::Method::TabFocus(params) if params.tab_id == "tab_1"
-            ));
-        } else {
-            assert!(matches!(
-                &request.method,
-                crate::api::schema::Method::TabClose(params) if params.tab_id == "tab_1"
-            ));
-        }
-    }
 }

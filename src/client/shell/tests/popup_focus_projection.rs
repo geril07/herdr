@@ -170,10 +170,9 @@ fn desktop_composition_keeps_shell_outside_origin_relative_surface() {
     assert!(text.contains("main"));
     assert!(text.contains("LIVE"));
     assert!(!text.contains("1 1"));
-    let pane_origin = state.layout(106, 20).pane_surface;
     assert_eq!(
         frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
-        Some((pane_origin.x + 1, pane_origin.y + 1))
+        Some((27, 2))
     );
 }
 
@@ -205,116 +204,6 @@ fn client_composes_popup_terminal_content_inside_client_owned_chrome() {
         frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
         Some((popup.inner_rect.x + 2, popup.inner_rect.y + 1))
     );
-}
-
-#[test]
-fn custom_popup_centers_in_full_window_with_visible_sidebar() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface_with_popup());
-
-    let (cols, rows) = (106, 20);
-    let layout = state.layout(cols, rows);
-    assert!(layout.sidebar.width > 0);
-    state.compose(cols, rows).expect("popup frame");
-    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
-    // Fixed 12x5 cells: size is unchanged, position is window-centered, not pane-centered.
-    assert_eq!(popup.rect.width, 12);
-    assert_eq!(popup.rect.height, 5);
-    assert_eq!(popup.rect.x, (cols - 12) / 2);
-    assert_eq!(popup.rect.y, (rows - 5) / 2);
-    assert_eq!(popup.inner_rect.width, 9);
-    assert_eq!(popup.inner_rect.height, 3);
-
-    // Percent sizes resolve against the full terminal area (tmux display-popup
-    // semantics); the position stays window-centered.
-    let mut percent_surface = surface_with_popup();
-    let percent_popup = percent_surface.popup.as_mut().expect("popup surface");
-    percent_popup.width = Some(crate::protocol::ClientShellPopupSize::Percent(50));
-    percent_popup.height = Some(crate::protocol::ClientShellPopupSize::Percent(50));
-    state.set_pane_surface(percent_surface);
-    state.compose(cols, rows).expect("percent popup frame");
-    let popup = state.hits.popup.as_ref().expect("percent popup hit");
-    let window = Rect::new(0, 0, cols, rows);
-    let expected_size = crate::popup_size::resolve_popup_geometry(
-        Some(crate::popup_size::PopupSize::Percent(50)),
-        Some(crate::popup_size::PopupSize::Percent(50)),
-        window,
-    )
-    .expect("terminal-area geometry");
-    assert_eq!(popup.rect.width, expected_size.outer.width);
-    assert_eq!(popup.rect.height, expected_size.outer.height);
-    assert_eq!(popup.rect.x, (cols - popup.rect.width) / 2);
-    assert_eq!(popup.rect.y, (rows - popup.rect.height) / 2);
-}
-
-#[test]
-fn popup_dims_full_window_background_but_not_popup_content() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface());
-
-    let dim = ratatui::style::Modifier::DIM.bits();
-    let plain = state.compose(106, 20).expect("plain frame");
-    assert_eq!(
-        plain.cells[0].modifier & dim,
-        0,
-        "background without a popup must not be dimmed"
-    );
-
-    state.set_pane_surface(surface_with_popup());
-    let frame = state.compose(106, 20).expect("popup frame");
-    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
-    assert_ne!(
-        frame.cells[0].modifier & dim,
-        0,
-        "custom popup must dim the full-window background"
-    );
-    let inner_index = usize::from(popup.inner_rect.y) * usize::from(frame.width)
-        + usize::from(popup.inner_rect.x);
-    assert_eq!(
-        frame.cells[inner_index].modifier & dim,
-        0,
-        "popup content must not inherit the background dim"
-    );
-    let border_index =
-        usize::from(popup.rect.y) * usize::from(frame.width) + usize::from(popup.rect.x);
-    assert_eq!(
-        frame.cells[border_index].modifier & dim,
-        0,
-        "popup chrome must not stay dimmed"
-    );
-}
-
-#[test]
-fn popup_percent_resolves_against_full_terminal_not_pane_surface() {
-    // At 106x20 with default sidebar 26, pane surface is 80x19. 50% must give
-    // 53x10 outer (full) centered over the terminal, not 40x9 (surface).
-    let mut surface = surface_with_popup();
-    surface.popup.as_mut().expect("popup").width =
-        Some(crate::protocol::ClientShellPopupSize::Percent(50));
-    surface.popup.as_mut().expect("popup").height =
-        Some(crate::protocol::ClientShellPopupSize::Percent(50));
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface);
-
-    let frame = state.compose(106, 20).expect("popup frame");
-    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
-    assert_eq!((popup.rect.width, popup.rect.height), (53, 10));
-    assert_eq!((popup.inner_rect.width, popup.inner_rect.height), (50, 8));
-    // Centered over full 106x20: x=(106-53)/2=26, y=(20-10)/2=5.
-    assert_eq!((popup.rect.x, popup.rect.y), (26, 5));
-    assert_eq!((popup.inner_rect.x, popup.inner_rect.y), (27, 6));
-    // Cell-count popups are absolute and unchanged by the base-area fix.
-    let surface = surface_with_popup();
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.set_pane_surface(surface);
-    let _ = state.compose(106, 20).expect("popup frame");
-    let popup = state.hits.popup.as_ref().expect("popup hit geometry");
-    assert_eq!((popup.rect.width, popup.rect.height), (12, 5));
-    let _ = frame;
 }
 
 #[test]
@@ -858,8 +747,8 @@ fn resize_invalidation_drops_stale_hits_but_preserves_gesture_release() {
     let stale_click =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Right),
-            column: pane.inner_rect.x + 1,
-            row: pane.inner_rect.y + 1,
+            column: 27,
+            row: 1,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(stale_click.requests.is_empty());

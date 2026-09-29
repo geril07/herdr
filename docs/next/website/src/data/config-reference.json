@@ -536,18 +536,6 @@
           "description": "Open the workspace navigation surface."
         },
         {
-          "key": "keys.agent_picker",
-          "type": "keybinding",
-          "default": "\"prefix+shift+a\"",
-          "description": "Open the agent picker."
-        },
-        {
-          "key": "keys.agent_navigation",
-          "type": "keybinding",
-          "default": "\"prefix+a\"",
-          "description": "Open the agent navigation surface."
-        },
-        {
           "key": "keys.goto",
           "type": "keybinding",
           "default": "\"prefix+g\"",
@@ -564,12 +552,6 @@
           "type": "keybinding",
           "default": "\"down\"",
           "description": "Move workspace selection down in navigate mode."
-        },
-        {
-          "key": "keys.navigate_workspace_open",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Additional direct key that opens the selected workspace in navigate mode. Enter always works."
         },
         {
           "key": "keys.navigate_pane_left",
@@ -594,12 +576,6 @@
           "type": "keybinding",
           "default": "\"l\"",
           "description": "Focus the pane to the right in navigate mode. Right arrow is always an alias."
-        },
-        {
-          "key": "keys.confirm_accept",
-          "type": "keybinding",
-          "default": "unset",
-          "description": "Additional direct key that accepts destructive confirmation dialogs (close workspace/tab/pane, delete worktree checkout). Enter always accepts, esc always cancels."
         },
         {
           "key": "keys.detach",
@@ -912,16 +888,6 @@
           ]
         },
         {
-          "key": "ui.sidebar_position",
-          "type": "enum",
-          "default": "left",
-          "description": "Desktop sidebar placement.",
-          "values": [
-            "left",
-            "right"
-          ]
-        },
-        {
           "key": "ui.mobile_width_threshold",
           "type": "integer",
           "default": "64",
@@ -975,18 +941,6 @@
           "description": "Ask for confirmation before closing a workspace."
         },
         {
-          "key": "ui.confirm_pane_close",
-          "type": "boolean",
-          "default": "true",
-          "description": "Ask for confirmation before closing a pane."
-        },
-        {
-          "key": "ui.confirm_tab_close",
-          "type": "boolean",
-          "default": "true",
-          "description": "Ask for confirmation before closing a tab."
-        },
-        {
           "key": "ui.prompt_new_tab_name",
           "type": "boolean",
           "default": "true",
@@ -997,18 +951,6 @@
           "type": "boolean",
           "default": "false",
           "description": "Ask for a workspace name before interactive TUI creation."
-        },
-        {
-          "key": "ui.navigator_start_expanded",
-          "type": "boolean",
-          "default": "true",
-          "description": "Start the session navigator with all workspaces expanded. Set false for a sessions-only list; Space still expands one workspace."
-        },
-        {
-          "key": "ui.navigator_start_search_focused",
-          "type": "boolean",
-          "default": "false",
-          "description": "Focus the session navigator search field on open. Set true for type-to-filter with Ctrl+n/Ctrl+p navigation."
         },
         {
           "key": "ui.pane_borders",
@@ -1062,12 +1004,6 @@
           ]
         },
         {
-          "key": "ui.tab_bar_numbers",
-          "type": "boolean",
-          "default": "false",
-          "description": "Show position numbers before custom-named desktop tabs."
-        },
-        {
           "key": "ui.tab_bar_right",
           "type": "array",
           "default": "[]",
@@ -1085,40 +1021,6 @@
           "type": "string",
           "default": "\" \"",
           "description": "Text inserted between visible right-aligned tab bar entries."
-        },
-        {
-          "key": "ui.tab_status",
-          "type": "boolean",
-          "default": "true",
-          "description": "Enable agent status indicators on tabs."
-        },
-        {
-          "key": "ui.tab_status_idle",
-          "type": "boolean",
-          "default": "true",
-          "description": "Show indicators for Idle agents."
-        },
-        {
-          "key": "ui.tab_status_max",
-          "type": "integer",
-          "default": "3",
-          "description": "Maximum number of status indicators per tab."
-        },
-        {
-          "key": "ui.tab_status_spacing",
-          "type": "boolean",
-          "default": "true",
-          "description": "Add space between multiple status indicators on a tab."
-        },
-        {
-          "key": "ui.tab_status_order",
-          "type": "enum",
-          "default": "\"physical\"",
-          "description": "Tab status indicator order: \"physical\" or \"priority\".",
-          "values": [
-            "physical",
-            "priority"
-          ]
         },
         {
           "key": "ui.window_title",

@@ -1,17 +1,5 @@
 use super::*;
 
-fn accept_button_label(accept_key: Option<&str>, force_confirmation: bool) -> String {
-    let action = if force_confirmation {
-        "delete anyway"
-    } else {
-        "remove"
-    };
-    match accept_key {
-        Some(key) => format!(" ↵/{key} {action} "),
-        None => format!(" ↵ {action} "),
-    }
-}
-
 pub(super) fn render_worktree_create_overlay(
     b: &mut Buffer,
     create: &ClientWorktreeCreateOverlay,
@@ -320,7 +308,6 @@ pub(super) fn render_worktree_open_overlay(
 pub(super) fn render_worktree_remove_overlay(
     b: &mut Buffer,
     remove: &ClientWorktreeRemoveOverlay,
-    accept_key: Option<&str>,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let popup = popup(b.area, 72, 10)?;
@@ -396,7 +383,11 @@ pub(super) fn render_worktree_remove_overlay(
     button(
         b,
         *primary,
-        &accept_button_label(accept_key, remove.force_confirmation),
+        if remove.force_confirmation {
+            " ↵ delete anyway "
+        } else {
+            " ↵ remove "
+        },
         Style::default()
             .fg(contrast(p))
             .bg(p.red)

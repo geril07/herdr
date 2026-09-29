@@ -13,9 +13,6 @@ pub(crate) struct OverlayRender {
     pub(crate) navigator_popup: Rect,
     pub(crate) navigator_search: Rect,
     pub(crate) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
-    pub(crate) agent_picker_popup: Rect,
-    pub(crate) agent_picker_search: Rect,
-    pub(crate) agent_picker_rows: Vec<(Rect, ClientEndpointId, String)>,
     pub(crate) worktree_search: Rect,
     pub(crate) worktree_rows: Vec<(Rect, usize)>,
     pub(crate) help_popup: Rect,
@@ -40,14 +37,12 @@ pub(crate) fn render_client_overlay(
     s: &ClientShellSnapshot,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
-    config: &ClientShellConfig,
+    k: &LiveKeybindConfig,
+    p: &Palette,
 ) -> Option<OverlayRender> {
-    let p = &config.palette;
-    let k = &config.keybinds;
     if !matches!(
         o,
         ClientShellOverlay::Navigator(_)
-            | ClientShellOverlay::AgentPicker(_)
             | ClientShellOverlay::ContextMenu(_)
             | ClientShellOverlay::GlobalMenu(_)
     ) {
@@ -65,27 +60,11 @@ pub(crate) fn render_client_overlay(
             render_release_notes_overlay(b, v, &s.update_install_command, p)
         }
         ClientShellOverlay::Rename(v) => render_rename_overlay(b, v, p),
-        ClientShellOverlay::ConfirmClose(v) => {
-            render_confirm_close_overlay(b, v, confirm_accept_label(k), p)
-        }
+        ClientShellOverlay::ConfirmClose(v) => render_confirm_close_overlay(b, v, p),
         ClientShellOverlay::Help(v) => render_help_overlay(b, v, k, p),
-        ClientShellOverlay::Navigator(v) => render_navigator_overlay(
-            b,
-            v,
-            endpoints,
-            active_endpoint_id,
-            config.status_indicators,
-            p,
-        ),
-        ClientShellOverlay::AgentPicker(v) => render_agent_picker_overlay(
-            b,
-            v,
-            endpoints,
-            active_endpoint_id,
-            config.agent_panel_sort,
-            config.status_indicators,
-            p,
-        ),
+        ClientShellOverlay::Navigator(v) => {
+            render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
+        }
         ClientShellOverlay::Settings(v) => {
             settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
         }
@@ -96,7 +75,7 @@ pub(crate) fn render_client_overlay(
             worktree_overlays::render_worktree_open_overlay(b, v, p)
         }
         ClientShellOverlay::WorktreeRemove(v) => {
-            worktree_overlays::render_worktree_remove_overlay(b, v, confirm_accept_label(k), p)
+            worktree_overlays::render_worktree_remove_overlay(b, v, p)
         }
         ClientShellOverlay::ContextMenu(_) | ClientShellOverlay::GlobalMenu(_) => None,
     }
@@ -319,16 +298,6 @@ fn contrast(p: &Palette) -> ratatui::style::Color {
         ratatui::style::Color::Reset => p.surface_dim,
         c => c,
     }
-}
-
-/// First configured `keys.confirm_accept` alias for destructive dialogs, if any.
-/// All configured aliases work as input; only the first is shown on buttons.
-fn confirm_accept_label(k: &LiveKeybindConfig) -> Option<&str> {
-    k.keybinds
-        .confirm_accept
-        .bindings
-        .first()
-        .map(|binding| binding.label.as_str())
 }
 fn render_release_notes_overlay(
     b: &mut Buffer,
@@ -676,10 +645,12 @@ fn render_rename_overlay(
     );
     let input = Rect::new(i.x, i.y + 2, i.width, 1);
     b.set_style(input, Style::default().fg(p.text).bg(p.surface0));
-    let cursor = text_editor::render(
+    put_text(
         b,
-        Rect::new(input.x + 1, input.y, input.width.saturating_sub(1), 1),
-        &v.input,
+        input.x,
+        input.y,
+        input.width.saturating_sub(1),
+        &format!(" {}", v.input),
         Style::default().fg(p.text).bg(p.surface0),
     );
     let rs = row(i, &[8, 10, 12], 2, 3);
@@ -711,7 +682,12 @@ fn render_rename_overlay(
         navigator_rows: Vec::new(),
         worktree_search: Rect::default(),
         worktree_rows: Vec::new(),
-        cursor,
+        cursor: Some(crate::protocol::CursorState {
+            x: (input.x + 1 + display_width(&v.input)).min(input.right() - 1),
+            y: input.y,
+            visible: true,
+            shape: 0,
+        }),
         ..OverlayRender::default()
     })
 }
@@ -739,14 +715,21 @@ fn render_navigator_overlay(
     n: &ClientNavigatorOverlay,
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
-    indicators: crate::config::StatusIndicatorStyle,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let q = popup(b.area, 84, (b.area.height * 75 / 100).clamp(16, 26))?.intersection(b.area);
+    let a = b.area;
+    let mx = (a.width / 16).max(2);
+    let my = (a.height / 10).max(1);
+    let q = Rect::new(
+        a.x + mx,
+        a.y + my,
+        a.width.saturating_sub(mx * 2).max(4),
+        a.height.saturating_sub(my * 2).max(4),
+    );
     let i = panel(b, q, p.accent, p.panel_bg)?;
     let rows = super::aggregate_navigation::navigator_rows(endpoints, active_endpoint_id, n);
     let search = if n.search_focused {
-        " / ".to_owned()
+        format!(" / {}", n.query)
     } else if let Some(f) = n.filter {
         format!(
             " / {}",
@@ -772,32 +755,16 @@ fn render_navigator_overlay(
             .fg(if n.search_focused { p.text } else { p.overlay0 })
             .bg(p.panel_bg),
     );
-    let count = format!(
-        "{} panes",
-        rows.iter()
-            .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
-            .count()
-    );
-    let cursor = if n.search_focused {
-        text_editor::render(
-            b,
-            Rect::new(
-                i.x + 3,
-                i.y,
-                i.width.saturating_sub(4 + display_width(&count)),
-                1,
-            ),
-            &n.query,
-            Style::default().fg(p.text).bg(p.panel_bg),
-        )
-    } else {
-        None
-    };
     put_right_text(
         b,
         i,
         i.y,
-        &count,
+        &format!(
+            "{} panes",
+            rows.iter()
+                .filter(|row| matches!(row.target, ClientNavigatorTarget::Pane { .. }))
+                .count()
+        ),
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
     put_text(
@@ -881,13 +848,8 @@ fn render_navigator_overlay(
                 prefix
             }
         };
-        // The two-cell marker slot keeps status icons and labels aligned
-        // whether or not a row is the current one.
-        let current = if r.current { "◆ " } else { "  " };
-        let status = r
-            .status
-            .map(|s| status_icon(s, indicators))
-            .unwrap_or_default();
+        let current = if r.current { "◆ " } else { "" };
+        let status = r.status.map(status_dot).unwrap_or_default();
         let status_separator = if status.is_empty() { "" } else { " " };
         let label = format!(" {tree} {current}{status}{status_separator}{}", r.label);
         put_text(b, rect.x, rect.y, rect.width, &label, st);
@@ -902,8 +864,8 @@ fn render_navigator_overlay(
                 b,
                 rect.x.saturating_add(display_width(&prefix)),
                 rect.y,
-                display_width(status_icon(status, indicators)),
-                status_icon(status, indicators),
+                display_width(status_dot(status)),
+                status_dot(status),
                 status_style,
             );
         }
@@ -964,7 +926,7 @@ fn render_navigator_overlay(
         if n.search_focused {
             " search type · move ↑↓/ctrl+n/p · open enter · back esc"
         } else {
-            " move j/k/ctrl+n/p · toggle space · expand/collapse e/c · filter F/b/w/i/d · search / · open enter · close x · back esc"
+            " move j/k · expand space · filter a/b/w/i/d · search / · open enter · close esc"
         },
         Style::default().fg(p.overlay0).bg(p.panel_bg),
     );
@@ -978,220 +940,8 @@ fn render_navigator_overlay(
         navigator_rows: row_hits,
         worktree_search: Rect::default(),
         worktree_rows: Vec::new(),
-        cursor,
-        ..OverlayRender::default()
-    })
-}
-
-fn render_agent_picker_overlay(
-    b: &mut Buffer,
-    picker: &ClientAgentPickerOverlay,
-    endpoints: &[ClientShellEndpoint],
-    active_endpoint_id: &ClientEndpointId,
-    sort: crate::config::AgentPanelSortConfig,
-    indicators: crate::config::StatusIndicatorStyle,
-    p: &Palette,
-) -> Option<OverlayRender> {
-    let q = popup(b.area, 76, (b.area.height * 65 / 100).clamp(14, 22))?;
-    let i = panel(b, q, p.accent, p.panel_bg)?;
-    let rows =
-        super::aggregate_navigation::agent_picker_rows(endpoints, active_endpoint_id, sort, picker);
-    let search = if picker.search_focused {
-        format!(" / {}", picker.query)
-    } else if let Some(f) = picker.filter {
-        format!(
-            " / {}",
-            match f {
-                ClientNavigatorFilter::Blocked => "blocked",
-                ClientNavigatorFilter::Working => "working",
-                ClientNavigatorFilter::Idle => "idle",
-                ClientNavigatorFilter::Done => "done",
-            }
-        )
-    } else if picker.query.is_empty() {
-        " / search agents".to_owned()
-    } else {
-        format!(" / {}", picker.query)
-    };
-    put_text(
-        b,
-        i.x,
-        i.y,
-        i.width,
-        &search,
-        Style::default()
-            .fg(if picker.search_focused {
-                p.text
-            } else {
-                p.overlay0
-            })
-            .bg(p.panel_bg),
-    );
-    let count_text = if rows.len() == 1 {
-        "1 agent".to_owned()
-    } else {
-        format!("{} agents", rows.len())
-    };
-    put_right_text(
-        b,
-        i,
-        i.y,
-        &count_text,
-        Style::default().fg(p.overlay0).bg(p.panel_bg),
-    );
-    put_text(
-        b,
-        i.x,
-        i.y + 1,
-        i.width,
-        &"─".repeat(i.width as usize),
-        Style::default().fg(p.surface1).bg(p.panel_bg),
-    );
-    let body = Rect::new(i.x, i.y + 2, i.width, i.height.saturating_sub(4));
-    let selected =
-        super::aggregate_navigation::agent_picker_selected_index(&rows, picker).unwrap_or(0);
-    let max = rows.len().saturating_sub(body.height as usize);
-    let scroll = picker
-        .scroll
-        .max(selected.saturating_sub(body.height.saturating_sub(1) as usize))
-        .min(selected)
-        .min(max);
-    let mut row_hits = Vec::new();
-    // Table columns: status | workspace_tab | agent_label | elapsed.
-    // Widths come from all filtered rows so columns do not jump while scrolling.
-    // Workspace caps at 36, agent caps at 12; elapsed keeps a fixed column.
-    let ws_cap: u16 = 36;
-    let ws_max = rows
-        .iter()
-        .map(|r| display_width(&r.workspace_tab))
-        .max()
-        .unwrap_or(0)
-        .min(ws_cap);
-    let agent_cap: u16 = 12;
-    let agent_col = rows
-        .iter()
-        .map(|r| display_width(&r.agent_label))
-        .max()
-        .unwrap_or(0)
-        .min(agent_cap);
-    let elapsed_max = rows
-        .iter()
-        .filter_map(|r| r.status_elapsed.as_ref().map(|e| display_width(e)))
-        .max()
-        .unwrap_or(0);
-    for (ix, r) in rows.iter().enumerate().take(scroll + body.height as usize) {
-        if ix < scroll {
-            continue;
-        }
-        let rect = Rect::new(body.x, body.y + (ix - scroll) as u16, body.width, 1);
-        row_hits.push((rect, r.endpoint_id.clone(), r.pane_id.clone()));
-        let st = if r.stale {
-            Style::default()
-                .fg(p.overlay0)
-                .bg(if ix == selected {
-                    p.surface0
-                } else {
-                    p.panel_bg
-                })
-                .add_modifier(Modifier::DIM)
-        } else if ix == selected {
-            Style::default()
-                .fg(contrast(p))
-                .bg(p.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-                .fg(if r.current { p.text } else { p.subtext0 })
-                .bg(p.panel_bg)
-        };
-        b.set_style(rect, st);
-
-        // The two-cell marker slot keeps every following table column aligned.
-        let current = if r.current { "◆ " } else { "  " };
-        let status = status_icon(r.status, indicators);
-        let ws_shown = crate::ui::truncate_end(&r.workspace_tab, ws_max as usize);
-        let ws_padded = format!(
-            "{ws_shown}{}",
-            " ".repeat(ws_max.saturating_sub(display_width(&ws_shown)) as usize)
-        );
-        // 1 leading + 2 current + 1 status + 1 space.
-        let agent_shown = crate::ui::truncate_end(&r.agent_label, agent_col as usize);
-        let agent_padded = format!(
-            "{agent_shown}{}",
-            " ".repeat(agent_col.saturating_sub(display_width(&agent_shown)) as usize)
-        );
-        let elapsed_suffix = if elapsed_max > 0 {
-            let elapsed = r.status_elapsed.as_deref().unwrap_or("");
-            let pad = (elapsed_max.saturating_sub(display_width(elapsed))) as usize;
-            format!("  {}{elapsed}", " ".repeat(pad))
-        } else {
-            String::new()
-        };
-        let label = format!(" {current}{status} {ws_padded}  {agent_padded}{elapsed_suffix}");
-        put_text(b, rect.x, rect.y, rect.width, &label, st);
-
-        if !r.stale && ix != selected {
-            let prefix = format!(" {current}");
-            let status_style = Style::default()
-                .fg(status_color(r.status, p))
-                .bg(p.panel_bg);
-            put_text(
-                b,
-                rect.x.saturating_add(display_width(&prefix)),
-                rect.y,
-                display_width(status),
-                status,
-                status_style,
-            );
-        }
-    }
-    let dy = i.bottom() - 2;
-    if let Some(r) = rows.get(selected) {
-        let detail = match (&r.title, &r.status_elapsed) {
-            (Some(title), Some(elapsed)) if title != &r.agent_label => {
-                format!(
-                    " {} · {} · {} ({})",
-                    r.workspace_tab, r.agent_label, title, elapsed
-                )
-            }
-            (Some(title), None) if title != &r.agent_label => {
-                format!(" {} · {} · {}", r.workspace_tab, r.agent_label, title)
-            }
-            (_, Some(elapsed)) => {
-                format!(" {} · {} · {}", r.workspace_tab, r.agent_label, elapsed)
-            }
-            _ => {
-                format!(" {} · {}", r.workspace_tab, r.agent_label)
-            }
-        };
-        put_text(
-            b,
-            i.x,
-            dy,
-            i.width,
-            &detail,
-            Style::default().fg(p.overlay0).bg(p.panel_bg),
-        );
-    }
-    put_text(
-        b,
-        i.x,
-        i.bottom() - 1,
-        i.width,
-        if picker.search_focused {
-            " search type · move ↑↓/ctrl+n/p · open enter · back esc"
-        } else {
-            " move j/k/ctrl+n/p · filter F/b/w/i/d · search / · open enter · close esc"
-        },
-        Style::default().fg(p.overlay0).bg(p.panel_bg),
-    );
-    Some(OverlayRender {
-        area: q,
-        agent_picker_popup: q,
-        agent_picker_search: Rect::new(i.x, i.y, i.width, 1),
-        agent_picker_rows: row_hits,
-        cursor: picker.search_focused.then(|| crate::protocol::CursorState {
-            x: i.x + 3 + display_width(&picker.query),
+        cursor: n.search_focused.then(|| crate::protocol::CursorState {
+            x: i.x + 3 + display_width(&n.query),
             y: i.y,
             visible: true,
             shape: 0,
@@ -1309,7 +1059,7 @@ fn render_help_overlay(
         sy,
         i.width,
         &if h.search_focused {
-            " / ".to_owned()
+            format!(" / {}", h.query)
         } else {
             " / press / to filter by command or shortcut".to_owned()
         },
@@ -1317,16 +1067,6 @@ fn render_help_overlay(
             .fg(if h.search_focused { p.text } else { p.overlay0 })
             .bg(p.panel_bg),
     );
-    let cursor = if h.search_focused {
-        text_editor::render(
-            b,
-            Rect::new(i.x + 3, sy, i.width.saturating_sub(3), 1),
-            &h.query,
-            Style::default().fg(p.text).bg(p.panel_bg),
-        )
-    } else {
-        None
-    };
 
     let body = Rect::new(i.x, i.y + 3, i.width, i.height.saturating_sub(5));
     let lines = help_lines(k, &h.query, p);
@@ -1386,7 +1126,7 @@ fn render_help_overlay(
         i.bottom() - 1,
         i.width,
         if h.search_focused {
-            " edit ←→/home/end · kill ^u/^k · yank ^y · scroll ↑↓ · back esc"
+            " filter type/backspace · clear ctrl+u · scroll ↑↓/pgup/pgdn · back esc"
         } else {
             " search / · scroll j/k/↑↓/pgup/pgdn · close esc/enter"
         },
@@ -1399,14 +1139,18 @@ fn render_help_overlay(
         help_scrollbar: scrollbar.unwrap_or_default(),
         help_scroll_metrics: Some(metrics),
         help_max_scroll: max_scroll,
-        cursor,
+        cursor: h.search_focused.then(|| crate::protocol::CursorState {
+            x: (i.x + 3 + display_width(&h.query)).min(i.right() - 1),
+            y: sy,
+            visible: true,
+            shape: 0,
+        }),
         ..OverlayRender::default()
     })
 }
 fn render_confirm_close_overlay(
     b: &mut Buffer,
     c: &ClientConfirmCloseOverlay,
-    accept_key: Option<&str>,
     p: &Palette,
 ) -> Option<OverlayRender> {
     let q = popup(b.area, 64, 6)?;
@@ -1434,11 +1178,10 @@ fn render_confirm_close_overlay(
     let [ok, cancel] = rs.as_slice() else {
         return None;
     };
-    let accept = accept_key.map(|key| format!(" ↵/{key} confirm "));
     button(
         b,
         *ok,
-        accept.as_deref().unwrap_or(" ↵ confirm "),
+        " ↵ confirm ",
         Style::default()
             .fg(contrast(p))
             .bg(p.red)

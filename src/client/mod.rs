@@ -1152,14 +1152,6 @@ async fn run_client_loop(
                     }
                 } else if let Err(e) = write_to_server(&mut write_stream, &msg) {
                     return Err(ClientError::ConnectionLost(e));
-                } else if state.shell.is_some() {
-                    // Popup percentages use the full terminal area. Report it
-                    // alongside the pane-surface resize; old servers ignore the
-                    // unknown control and keep the surface fallback.
-                    let _ = write_to_server(
-                        &mut write_stream,
-                        &crate::protocol::endpoint::terminal_size_control(new_cols, new_rows),
-                    );
                 }
             }
             ClientLoopEvent::EndpointSupervisor(event) => match event {
@@ -2097,8 +2089,7 @@ async fn run_client_loop(
                         let (effects, notification_repaint) = shell.tick_notifications(now);
                         outcome.repaint |= notification_repaint
                             | shell.tick_copy_feedback(now)
-                            | shell.tick_endpoint_error(now)
-                            | shell.tick_status_elapsed();
+                            | shell.tick_endpoint_error(now);
                         let frame = outcome
                             .repaint
                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))

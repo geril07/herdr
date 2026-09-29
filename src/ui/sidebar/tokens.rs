@@ -13,7 +13,6 @@ pub(crate) struct ResolvedToken {
 pub(crate) enum ResolvedTokenKind {
     StateIcon,
     StateText(String),
-    StateElapsed(String),
     Machine(String),
     Workspace(String),
     Tab(String),
@@ -29,7 +28,6 @@ impl ResolvedTokenKind {
     fn text_value(&self) -> Option<&str> {
         match self {
             Self::StateText(value)
-            | Self::StateElapsed(value)
             | Self::Machine(value)
             | Self::Workspace(value)
             | Self::Tab(value)
@@ -63,7 +61,6 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) canonical_agent: Option<crate::detect::Agent>,
-    pub(crate) status_elapsed: Option<&'a str>,
     pub(crate) tokens: &'a std::collections::HashMap<String, String>,
 }
 
@@ -85,9 +82,6 @@ pub(crate) fn agent_rows(
                         AgentSidebarToken::StateText => {
                             Some(ResolvedTokenKind::StateText(state_text.to_string()))
                         }
-                        AgentSidebarToken::StateElapsed => context
-                            .status_elapsed
-                            .map(|value| ResolvedTokenKind::StateElapsed(value.to_string())),
                         AgentSidebarToken::Machine => context
                             .machine
                             .map(|value| ResolvedTokenKind::Machine(value.to_string())),
@@ -232,7 +226,6 @@ mod tests {
             terminal_title: entry.terminal_title.as_deref(),
             terminal_title_stripped: entry.terminal_title_stripped.as_deref(),
             canonical_agent: entry.canonical_agent,
-            status_elapsed: None,
             tokens: &entry.tokens,
         }
     }
@@ -485,27 +478,6 @@ rows = [[{ token = "$load", rules = [{ lt = 50, hide = true }] }], ["workspace"]
                 ResolvedToken::unstyled(ResolvedTokenKind::StateText("deep in the mines".into())),
                 ResolvedToken::unstyled(ResolvedTokenKind::Custom("reviewing auth".into())),
             ]]
-        );
-    }
-
-    #[test]
-    fn state_elapsed_is_omitted_until_the_server_reports_a_status_time() {
-        let config = AgentsSidebarConfig {
-            rows: vec![vec![AgentSidebarToken::StateElapsed]],
-            ..Default::default()
-        };
-        let mut entry = entry();
-        let rows = agent_rows(&config, context(&entry), "working");
-        assert!(rows.is_empty());
-
-        entry.tokens.insert("unused".into(), "value".into());
-        let mut context = context(&entry);
-        context.status_elapsed = Some("2m");
-        assert_eq!(
-            agent_rows(&config, context, "working"),
-            vec![vec![ResolvedToken::unstyled(
-                ResolvedTokenKind::StateElapsed("2m".into())
-            )]]
         );
     }
 

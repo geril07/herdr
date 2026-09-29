@@ -216,12 +216,10 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         }),
         ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
             target: ClientConfirmCloseTarget::Workspace {
-                endpoint_id: ClientEndpointId::Local,
                 workspace_id: "ws_1".into(),
             },
             title: "close".into(),
             detail: "confirm".into(),
-            return_to_navigator: None,
         }),
         ClientShellOverlay::Help(ClientHelpOverlay {
             query: TextEditor::default(),
@@ -235,13 +233,6 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
             scroll: 0,
             filter: None,
             expanded_workspaces: HashSet::new(),
-        }),
-        ClientShellOverlay::AgentPicker(ClientAgentPickerOverlay {
-            query: String::new(),
-            search_focused: false,
-            selected: None,
-            scroll: 0,
-            filter: None,
         }),
         ClientShellOverlay::WorktreeCreate(ClientWorktreeCreateOverlay {
             source_workspace_id: "ws_1".into(),
@@ -313,7 +304,8 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
                 snapshot,
                 &state.endpoints,
                 &state.active_endpoint_id,
-                &state.config,
+                &state.config.keybinds,
+                &state.config.palette,
             ),
         }
         .unwrap();

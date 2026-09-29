@@ -716,11 +716,7 @@ fn restore_tab(
     (
         Some((
             crate::workspace::Tab {
-                custom_name: snap
-                    .custom_name
-                    .clone()
-                    .map(|name| name.trim().to_owned())
-                    .filter(|name| !name.is_empty()),
+                custom_name: snap.custom_name.clone(),
                 number,
                 root_pane,
                 layout,

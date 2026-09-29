@@ -138,12 +138,11 @@ next_tab = "prefix+n"
 previous_tab = "prefix+p"
 focus_pane_left = "prefix+h"
 navigate_workspace_down = "j"
-navigate_workspace_open = "o"
 navigate_pane_down = "ctrl+j"
 split_horizontal = "prefix+minus"
 ```
 
-The default keymap is prefix-first so Herdr does not steal input from shells, editors, tmux, or terminal apps. In workspace navigation, `Enter` opens the selected workspace; `navigate_workspace_open` adds an optional direct-key alias such as `o`. Custom commands are not run while the workspace navigation preview is active. Search `keys.` in the [Config reference](/docs/config-reference/) to see every action and default binding. The in-app help panel at `prefix+?` shows the active bindings.
+The default keymap is prefix-first so Herdr does not steal input from shells, editors, tmux, or terminal apps. Search `keys.` in the [Config reference](/docs/config-reference/) to see every action and default binding. The in-app help panel at `prefix+?` shows the active bindings.
 
 A binding may also be an array when one action needs multiple shortcuts:
 
@@ -163,13 +162,6 @@ resize_pane_right = "ctrl+shift+alt+right"
 ```
 
 Key strings accept plain keys, modifier combinations such as `ctrl+a`, `shift+n`, `alt+1`, `cmd+k`, and special keys such as `enter`, `tab`, `esc`, `left`, `right`, `up`, and `down`. Named punctuation such as `minus`, `comma`, `ampersand`, `plus`, and `backtick` is also accepted. Plain direct printable keys such as `n` are unsafe because they intercept typing; use `prefix+n` unless you intentionally want a direct binding. The `navigate_workspace_*` and `navigate_pane_*` fields are navigate-mode-only and may use plain keys such as `j` or `k`; they must not use `prefix+`, `esc`, `enter`, `tab`, `shift+tab`, `left`, `right`, or unmodified `1` through `9`. Left and right arrows are permanent aliases for pane-left and pane-right navigation. These navigate-mode shortcuts are independent from general action bindings such as `focus_pane_down = "prefix+j"`; when both use the same key, the navigate-mode shortcut wins while navigate mode is open. Alt, Cmd/Super, and punctuation with modifiers depend on your terminal and tmux settings.
-
-Destructive confirmation dialogs (close workspace/tab/pane, delete worktree checkout) always accept `Enter` and cancel with `esc`. The `confirm_accept` field is dialog-only and adds an optional direct-key alias such as `y` for tmux habit; it is unset by default and must not use `prefix+` or `esc`:
-
-```toml
-[keys]
-confirm_accept = "y"
-```
 
 If you have old custom keybindings and want the new defaults, run `herdr config reset-keys`. Herdr backs up `config.toml`, removes `[keys]` and `[[keys.command]]`, and uses built-in v2 defaults after restart or `herdr server reload-config`.
 
@@ -204,9 +196,7 @@ height = "80%"
 The popup receives all terminal input, including Escape, until its command
 exits. `width` and `height` are optional; omit them for the default half-size
 popup, use numbers for terminal cells, or use strings like `"80%"` for a
-percentage of the full terminal area. Percentages resolve against the entire
-terminal (including the sidebar and tab bar) and the popup is centered over
-it, matching tmux `display-popup -w/-h`. Dimensions include the popup border, and
+percentage of the terminal area. Dimensions include the popup border, and
 values smaller than the popup minimum are clamped. Popup commands do not receive
 `HERDR_PANE_ID`; use `HERDR_ACTIVE_PANE_ID` for the underlying tiled pane.
 
@@ -314,10 +304,6 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
-Set `tab_bar_numbers = true` under `[ui]` to show the current position before custom-named desktop tabs. Agent status indicators remain before the number, for example `● 2 logs`. The default is `false`.
-
-Set `sidebar_position = "right"` under `[ui]` to place the desktop sidebar on the right side of the terminal panes. The default is `"left"`.
-
 Configure an ordered tmux-style status area at the right edge of the tab row:
 
 ```toml
@@ -371,7 +357,7 @@ The expanded desktop sidebar renders each inner array in `rows` as one line. The
 row_gap = 0
 rows = [
   ["state_icon", "machine", "workspace", "tab"],
-  ["agent", "state_elapsed"],
+  ["agent"],
 ]
 
 [ui.sidebar.spaces]
@@ -386,7 +372,6 @@ Agent rows accept these built-in tokens:
 
 - `state_icon` — colored icon for the agent's semantic state.
 - `state_text` — `idle`, `working`, `blocked`, `done`, or `unknown`, including a reported display label when present.
-- `state_elapsed` — time since the displayed status changed, rounded down to minutes.
 - `machine` — machine label when the client has multiple machines; omitted for a single local machine.
 - `workspace` — workspace name.
 - `tab` — tab name when available.

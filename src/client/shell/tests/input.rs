@@ -107,15 +107,6 @@ fn full_host_palette_response_is_sent_as_one_theme_update() {
 #[test]
 fn modal_paste_shortcut_modifiers_are_platform_specific() {
     let key = |code, modifiers| crate::input::TerminalKey::new(code, modifiers);
-    for macos in [false, true] {
-        assert!(!input::is_modal_paste_shortcut_for_platform(
-            &key(
-                KeyCode::Char('v'),
-                KeyModifiers::CONTROL | KeyModifiers::ALT
-            ),
-            macos
-        ));
-    }
 
     assert!(input::is_modal_paste_shortcut_for_platform(
         &key(KeyCode::Char('v'), KeyModifiers::CONTROL),
@@ -151,7 +142,8 @@ fn modal_paste_inserts_clipboard_text_through_overlay_text_path() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
         title: "rename pane",
-        input: TextEditor::new("replace me", true),
+        input: "replace me".into(),
+        replace_on_type: true,
         target: ClientRenameTarget::Pane {
             pane_id: "pane_1".into(),
         },
@@ -167,8 +159,8 @@ fn modal_paste_inserts_clipboard_text_through_overlay_text_path() {
     assert!(outcome.repaint);
     assert!(matches!(
         state.overlay,
-        Some(ClientShellOverlay::Rename(ClientRenameOverlay { ref input, .. }))
-            if input.as_str() == "feature/pasted"
+        Some(ClientShellOverlay::Rename(ClientRenameOverlay { ref input, replace_on_type: false, .. }))
+            if input == "feature/pasted"
     ));
 }
 
@@ -217,13 +209,8 @@ fn client_shell_graphics_follow_final_shell_origin_and_local_overlay_visibility(
 
     let visible = state.compose(106, 20).expect("visible graphics frame");
     let visible = String::from_utf8_lossy(&visible.graphics);
-    let pane_origin = state.layout(106, 20).pane_surface;
     assert!(visible.contains("a=t,t=d"));
-    assert!(visible.contains(&format!(
-        "\u{1b}[{};{}H",
-        pane_origin.y + 1,
-        pane_origin.x + 1
-    )));
+    assert!(visible.contains("\u{1b}[2;27H"));
 
     state.overlay = Some(ClientShellOverlay::Onboarding);
     let uncovered = state.compose(106, 20).expect("overlay frame");
@@ -648,88 +635,4 @@ fn styled_client_composition_preserves_pane_hyperlinks() {
         usize::from(hit.inner_rect.y) * usize::from(frame.width) + usize::from(hit.inner_rect.x);
     let link = frame.cells[index].hyperlink.expect("linked cell") as usize;
     assert_eq!(frame.hyperlinks[link], "https://example.test");
-}
-
-#[test]
-fn russian_ctrl_word_erase_forwards_latin_ctrl_w() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-
-    // `ц` is physical `w`: without base-layout reporting the terminal sends
-    // only the Cyrillic codepoint with the Ctrl modifier.
-    let outcome = state.handle_input_bytes("\x1b[1094;5u".as_bytes());
-    let ClientMessage::ClientShellPaneInput { events, .. } = &outcome.requests[0] else {
-        panic!("expected targeted pane input");
-    };
-    assert!(matches!(
-        &events[..],
-        [ClientPaneInputEvent::Key {
-            code: crate::protocol::ClientKeyCode::Char('w'),
-            modifiers,
-            ..
-        }] if *modifiers == KeyModifiers::CONTROL.bits()
-    ));
-
-    // With base-layout reporting the result is identical.
-    let outcome = state.handle_input_bytes("\x1b[1094::119;5u".as_bytes());
-    let ClientMessage::ClientShellPaneInput { events, .. } = &outcome.requests[0] else {
-        panic!("expected targeted pane input");
-    };
-    assert!(matches!(
-        &events[..],
-        [ClientPaneInputEvent::Key {
-            code: crate::protocol::ClientKeyCode::Char('w'),
-            modifiers,
-            ..
-        }] if *modifiers == KeyModifiers::CONTROL.bits()
-    ));
-}
-
-#[test]
-fn rename_tab_overlay_empty_input_sends_clear_for_default_fallback() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-        title: "rename tab",
-        input: "   ".into(),
-        target: ClientRenameTarget::Tab {
-            tab_id: "tab_1".into(),
-            auto_name: false,
-            original_name: "logs".into(),
-        },
-    }));
-    let mut outcome = ClientShellInput::default();
-    state.save_rename_overlay(&mut outcome);
-    assert!(state.overlay.is_none());
-    let method = outcome.actions.iter().find_map(|action| match action {
-        ClientShellAction::Endpoint { request, .. } => Some(&request.method),
-        _ => None,
-    });
-    assert!(
-        matches!(
-            method,
-            Some(crate::api::schema::Method::TabRename(params))
-                if params.tab_id == "tab_1" && params.label.is_empty()
-        ),
-        "empty tab rename should send a clear, got {method:?}"
-    );
-}
-
-#[test]
-fn rename_tab_overlay_unchanged_auto_name_sends_nothing() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
-    state.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
-        title: "rename tab",
-        input: "1".into(),
-        target: ClientRenameTarget::Tab {
-            tab_id: "tab_1".into(),
-            auto_name: true,
-            original_name: "1".into(),
-        },
-    }));
-    let mut outcome = ClientShellInput::default();
-    state.save_rename_overlay(&mut outcome);
-    assert!(state.overlay.is_none());
-    assert!(outcome.actions.is_empty());
 }

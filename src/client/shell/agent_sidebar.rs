@@ -42,35 +42,10 @@ pub(super) fn ordered_agent_pane_ids(
                 std::cmp::Reverse(agent.state_change_seq),
             )
         });
-    } else {
-        let order = grouped_workspace_order(snapshot);
-        agents.sort_by_key(|agent| {
-            order
-                .get(&agent.workspace_id)
-                .copied()
-                .unwrap_or(usize::MAX)
-        });
     }
     agents
         .into_iter()
         .map(|agent| agent.pane_id.clone())
-        .collect()
-}
-
-/// Grouped workspace position (parent, children, standalone) used to keep the
-/// agents panel in the same order as the spaces panel. Uses the fully expanded
-/// grouping so agents of collapsed groups stay ordered instead of hidden.
-fn grouped_workspace_order(snapshot: &ClientShellSnapshot) -> HashMap<String, usize> {
-    let empty = std::collections::HashSet::new();
-    super::render::workspace_entries(snapshot, &empty)
-        .into_iter()
-        .enumerate()
-        .filter_map(|(position, entry)| {
-            snapshot
-                .workspaces
-                .get(entry.index)
-                .map(|workspace| (workspace.workspace_id.clone(), position))
-        })
         .collect()
 }
 
@@ -80,7 +55,6 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
-    selected_pane_id: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -108,8 +82,7 @@ pub(super) fn render_agent_panel(
         |row| row.rows.len(),
         |buffer, rect, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
-            let selected = selected_pane_id == Some(row.pane_id.as_str());
-            render_agent_row(buffer, rect, row, config, selected);
+            render_agent_row(buffer, rect, row, config);
         },
     );
 }
@@ -266,10 +239,9 @@ pub(super) fn agent_rows(
     config: &ClientShellConfig,
     machine: Option<&str>,
 ) -> Vec<AgentRow> {
-    let now_unix_ms = current_unix_ms();
     ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
         .into_iter()
-        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine, now_unix_ms))
+        .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
         .collect()
 }
 
@@ -278,7 +250,6 @@ pub(super) fn agent_row(
     pane_id: &str,
     config: &ClientShellConfig,
     machine: Option<&str>,
-    now_unix_ms: u64,
 ) -> Option<AgentRow> {
     let agent = snapshot
         .agents
@@ -312,13 +283,7 @@ pub(super) fn agent_row(
         .iter()
         .cloned()
         .collect::<HashMap<_, _>>();
-    let mut tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
-    let status_elapsed = tokens
-        .remove(crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN)
-        .and_then(|value| value.parse().ok())
-        .and_then(|status_changed_unix_ms| {
-            format_status_elapsed(now_unix_ms, status_changed_unix_ms)
-        });
+    let tokens = agent.tokens.iter().cloned().collect::<HashMap<_, _>>();
     let state_text = labels
         .get(status_text(agent.agent_status))
         .map(String::as_str)
@@ -341,7 +306,6 @@ pub(super) fn agent_row(
             terminal_title: agent.terminal_title.as_deref(),
             terminal_title_stripped: agent.terminal_title_stripped.as_deref(),
             canonical_agent,
-            status_elapsed: status_elapsed.as_deref(),
             tokens: &tokens,
         },
         state_text,
@@ -359,17 +323,9 @@ pub(super) fn render_agent_row(
     rect: Rect,
     row: &AgentRow,
     config: &ClientShellConfig,
-    selected: bool,
 ) {
     let palette = &config.palette;
-    let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
-        palette.active_row_bg
-    } else {
-        palette.selection_bg
-    };
-    let row_style = if selected {
-        Style::default().bg(selection_background)
-    } else if row.focused {
+    let row_style = if row.focused {
         Style::default().bg(palette.active_row_bg)
     } else {
         Style::default()
@@ -436,52 +392,5 @@ fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str 
         AgentStatus::Done => "done",
         AgentStatus::Working => "working",
         AgentStatus::Idle | AgentStatus::Unknown => "idle",
-    }
-}
-
-pub(super) fn current_unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
-}
-
-pub(super) fn format_status_elapsed(
-    now_unix_ms: u64,
-    status_changed_unix_ms: u64,
-) -> Option<String> {
-    let elapsed_minutes = now_unix_ms.checked_sub(status_changed_unix_ms)? / 60_000;
-    if elapsed_minutes == 0 {
-        return Some("<1m".into());
-    }
-    if elapsed_minutes < 60 {
-        return Some(format!("{elapsed_minutes}m"));
-    }
-    Some(format!(
-        "{}h{:02}m",
-        elapsed_minutes / 60,
-        elapsed_minutes % 60
-    ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::format_status_elapsed;
-
-    #[test]
-    fn status_elapsed_uses_minute_precision() {
-        let minute = 60_000;
-        assert_eq!(format_status_elapsed(59_999, 0).as_deref(), Some("<1m"));
-        assert_eq!(format_status_elapsed(minute, 0).as_deref(), Some("1m"));
-        assert_eq!(
-            format_status_elapsed(59 * minute, 0).as_deref(),
-            Some("59m")
-        );
-        assert_eq!(
-            format_status_elapsed(61 * minute, 0).as_deref(),
-            Some("1h01m")
-        );
-        assert_eq!(format_status_elapsed(0, 1), None);
     }
 }

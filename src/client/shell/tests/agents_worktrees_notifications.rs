@@ -8,21 +8,19 @@ fn mouse_hits_use_stable_workspace_tab_and_pane_ids() {
     state.set_pane_surface(surface());
     state.compose(106, 20).expect("composed frame");
 
-    let workspace_rect = state.hits.workspaces[0].rect;
-    let pane_inner = state.hits.panes[0].inner_rect;
     let workspace_down =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: workspace_rect.x + 2,
-            row: workspace_rect.y,
+            column: 2,
+            row: 2,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(workspace_down.actions.is_empty());
     let workspace =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
             kind: MouseEventKind::Up(MouseButton::Left),
-            column: workspace_rect.x + 2,
-            row: workspace_rect.y,
+            column: 2,
+            row: 2,
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(workspace.requests.is_empty());
@@ -37,8 +35,8 @@ fn mouse_hits_use_stable_workspace_tab_and_pane_ids() {
 
     let pane = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: pane_inner.x + 1,
-        row: pane_inner.y,
+        column: 27,
+        row: 1,
         modifiers: KeyModifiers::empty(),
     })]);
     assert!(pane.requests.is_empty());
@@ -212,11 +210,10 @@ fn workspace_click_waits_for_release_and_drag_reorders_by_stable_id() {
         }) if source_workspace_id == "ws_1"
     ));
     let frame = state.compose(106, 24).expect("workspace drop indicator");
-    let sidebar_x = state.hits.workspace_body.x as usize;
     assert!(frame
         .cells
         .chunks(frame.width as usize)
-        .any(|row| row.iter().skip(sidebar_x).any(|cell| cell.symbol == "─")));
+        .any(|row| row.iter().take(20).any(|cell| cell.symbol == "─")));
 
     let release =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -847,7 +844,7 @@ fn workspace_actions_preserve_selected_target_and_client_confirmation() {
     assert!(matches!(
         state.overlay.as_ref(),
         Some(ClientShellOverlay::ConfirmClose(ClientConfirmCloseOverlay {
-            target: ClientConfirmCloseTarget::Workspace { workspace_id, .. },
+            workspace_id,
             ..
         })) if workspace_id == "ws_2"
     ));
@@ -1308,47 +1305,6 @@ fn worktree_remove_escalates_recoverable_failure_to_force_confirmation() {
         state.handle_input_bytes(b"\x1b");
         assert!(state.overlay.is_none());
     }
-}
-
-#[test]
-fn worktree_remove_accepts_confirm_alias() {
-    let config: Config = toml::from_str("[keys]\nconfirm_accept = \"y\"\n").unwrap();
-    let mut snapshot = snapshot();
-    snapshot.workspaces[0].worktree = Some(ClientShellWorktree {
-        key: "repo-key".into(),
-        label: "repo".into(),
-        is_linked_worktree: true,
-    });
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
-    state.set_snapshot(Box::new(snapshot));
-    state.set_pane_surface(surface());
-    let mut prepare = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::RemoveWorktree),
-        &mut prepare,
-    );
-    let [ClientShellAction::Endpoint { request, .. }] = &prepare.actions[..] else {
-        panic!("remove worktree should prepare through worktree.list");
-    };
-    let request_id = request.id.clone();
-    state.handle_endpoint_result(
-        "boot-1",
-        &request_id,
-        Ok(worktree_list_result(Some("ws_1"))),
-    );
-    assert!(matches!(
-        state.overlay,
-        Some(ClientShellOverlay::WorktreeRemove(_))
-    ));
-    let remove = state.handle_input_bytes(b"y");
-    let [ClientShellAction::Endpoint { request, .. }] = &remove.actions[..] else {
-        panic!("worktree remove alias should use endpoint API");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::WorktreeRemove(params)
-            if params.workspace_id == "ws_1" && !params.force
-    ));
 }
 
 #[test]

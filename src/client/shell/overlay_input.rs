@@ -191,20 +191,17 @@ impl ClientShellState {
     }
 
     pub(super) fn open_navigator_overlay(&mut self) {
-        let expanded_workspaces = if self.config.navigator_start_expanded {
+        let expanded_workspaces =
             super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
                 .flat_map(|endpoint| {
                     endpoint.snapshot.workspaces.iter().map(move |workspace| {
                         (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
                     })
                 })
-                .collect()
-        } else {
-            HashSet::new()
-        };
+                .collect();
         let mut navigator = ClientNavigatorOverlay {
-            query: TextEditor::default(),
-            search_focused: self.config.navigator_start_search_focused,
+            query: String::new(),
+            search_focused: false,
             selected: None,
             scroll: 0,
             filter: None,
@@ -217,76 +214,6 @@ impl ClientShellState {
             .find(|row| row.current)
             .map(|row| row.target.clone());
         self.overlay = Some(ClientShellOverlay::Navigator(navigator));
-    }
-
-    pub(super) fn open_agent_picker_overlay(&mut self) {
-        let mut picker = ClientAgentPickerOverlay {
-            query: String::new(),
-            search_focused: false,
-            selected: None,
-            scroll: 0,
-            filter: None,
-        };
-        let rows = render::client_agent_picker_rows(
-            &self.endpoints,
-            &self.active_endpoint_id,
-            self.config.agent_panel_sort,
-            &picker,
-        );
-        picker.selected = rows
-            .iter()
-            .find(|row| row.current)
-            .or_else(|| rows.first())
-            .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()));
-        self.overlay = Some(ClientShellOverlay::AgentPicker(picker));
-    }
-
-    pub(super) fn move_agent_picker_selection(&mut self, delta: isize) {
-        let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() else {
-            return;
-        };
-        let rows = render::client_agent_picker_rows(
-            &self.endpoints,
-            &self.active_endpoint_id,
-            self.config.agent_panel_sort,
-            picker,
-        );
-        if rows.is_empty() {
-            picker.selected = None;
-            return;
-        }
-        let selected =
-            super::aggregate_navigation::agent_picker_selected_index(&rows, picker).unwrap_or(0);
-        let next =
-            (selected as isize + delta).clamp(0, rows.len().saturating_sub(1) as isize) as usize;
-        picker.selected = Some((rows[next].endpoint_id.clone(), rows[next].pane_id.clone()));
-    }
-
-    pub(super) fn accept_agent_picker_selection(&mut self, outcome: &mut ClientShellInput) {
-        let target = self.overlay.as_ref().and_then(|overlay| match overlay {
-            ClientShellOverlay::AgentPicker(picker) => {
-                let rows = render::client_agent_picker_rows(
-                    &self.endpoints,
-                    &self.active_endpoint_id,
-                    self.config.agent_panel_sort,
-                    picker,
-                );
-                super::aggregate_navigation::selected_agent_picker_target(&rows, picker)
-            }
-            _ => None,
-        });
-        let Some((endpoint_id, pane_id)) = target else {
-            return;
-        };
-        let activated = self.focus_or_activate(
-            endpoint_id,
-            ClientEndpointFocusTarget::Pane(pane_id),
-            outcome,
-        );
-        if activated {
-            self.overlay = None;
-        }
-        outcome.repaint = true;
     }
 
     pub(super) fn move_navigator_selection(&mut self, delta: isize) {
@@ -354,132 +281,8 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    pub(super) fn close_navigator_selection(&mut self, outcome: &mut ClientShellInput) {
-        // Machine rows are group headers and cannot be closed.
-        let target = self.overlay.as_ref().and_then(|overlay| match overlay {
-            ClientShellOverlay::Navigator(navigator) => {
-                let rows = render::client_navigator_rows(
-                    &self.endpoints,
-                    &self.active_endpoint_id,
-                    navigator,
-                );
-                super::aggregate_navigation::selected_navigator_target(&rows, navigator)
-            }
-            _ => None,
-        });
-        let Some(target) = target else {
-            return;
-        };
-        match target {
-            ClientNavigatorTarget::Machine { .. } => return,
-            ClientNavigatorTarget::Workspace {
-                endpoint_id,
-                workspace_id,
-            } => {
-                if self.config.confirm_close {
-                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
-                } else {
-                    self.push_endpoint_method_to(
-                        &endpoint_id,
-                        crate::api::schema::Method::WorkspaceClose(
-                            crate::api::schema::WorkspaceCloseParams {
-                                workspace_id,
-                                close_group: true,
-                            },
-                        ),
-                        outcome,
-                    );
-                    self.retarget_navigator_selection_after_close();
-                }
-            }
-            ClientNavigatorTarget::Tab {
-                endpoint_id,
-                tab_id,
-            } => {
-                if self.config.confirm_tab_close {
-                    self.open_confirm_tab_close_overlay(&endpoint_id, tab_id);
-                } else {
-                    self.push_endpoint_method_to(
-                        &endpoint_id,
-                        crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
-                            tab_id,
-                        }),
-                        outcome,
-                    );
-                    self.retarget_navigator_selection_after_close();
-                }
-            }
-            ClientNavigatorTarget::Pane {
-                endpoint_id,
-                pane_id,
-            } => {
-                if self.config.confirm_pane_close {
-                    self.open_confirm_pane_close_overlay(&endpoint_id, pane_id);
-                } else {
-                    self.push_endpoint_method_to(
-                        &endpoint_id,
-                        crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
-                            pane_id,
-                        }),
-                        outcome,
-                    );
-                    self.retarget_navigator_selection_after_close();
-                }
-            }
-        }
-        outcome.repaint = true;
-    }
-
-    /// Snapshot the open navigator so a confirm dialog can return to it
-    /// instead of dropping the popup.
-    pub(super) fn navigator_for_confirm(&self) -> Option<ClientNavigatorOverlay> {
-        match self.overlay.as_ref() {
-            Some(ClientShellOverlay::Navigator(navigator)) => Some(navigator.clone()),
-            _ => None,
-        }
-    }
-
-    /// Restore the navigator saved on a confirm dialog after the close is
-    /// confirmed. Selection moves off the closing row like a direct close.
-    pub(super) fn restore_navigator_after_confirm(
-        &mut self,
-        navigator: Option<ClientNavigatorOverlay>,
-    ) {
-        self.overlay = navigator.map(ClientShellOverlay::Navigator);
-        if self.overlay.is_some() {
-            self.retarget_navigator_selection_after_close();
-        }
-    }
-
-    /// After a direct navigator close the popup stays open. Move selection to
-    /// the next row (or previous when closing the last row) so the highlight
-    /// does not fall back to the top of the list.
-    fn retarget_navigator_selection_after_close(&mut self) {
-        let next = self.overlay.as_ref().and_then(|overlay| match overlay {
-            ClientShellOverlay::Navigator(navigator) => {
-                let rows = render::client_navigator_rows(
-                    &self.endpoints,
-                    &self.active_endpoint_id,
-                    navigator,
-                );
-                let selected =
-                    super::aggregate_navigation::navigator_selected_index(&rows, navigator)?;
-                rows.get(selected + 1)
-                    .or_else(|| selected.checked_sub(1).and_then(|prev| rows.get(prev)))
-                    .map(|row| row.target.clone())
-            }
-            _ => None,
-        });
-        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-            navigator.selected = next;
-        }
-    }
-
     pub(super) fn toggle_selected_navigator_workspace(&mut self) {
-        // (endpoint, workspace, flip). Workspace rows flip their own expansion;
-        // tab/pane rows collapse the parent workspace. Selection always ends
-        // up on the workspace row so it never jumps to the top of the list.
-        let toggle = self.overlay.as_ref().and_then(|overlay| match overlay {
+        let workspace_key = self.overlay.as_ref().and_then(|overlay| match overlay {
             ClientShellOverlay::Navigator(navigator) => {
                 let rows = render::client_navigator_rows(
                     &self.endpoints,
@@ -491,54 +294,20 @@ impl ClientShellState {
                         ClientNavigatorTarget::Workspace {
                             endpoint_id,
                             workspace_id,
-                        } => Some((endpoint_id, workspace_id, true)),
-                        ClientNavigatorTarget::Tab {
-                            endpoint_id,
-                            tab_id,
-                        } => self
-                            .endpoints
-                            .iter()
-                            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
-                            .and_then(|endpoint| endpoint.snapshot.as_deref())
-                            .and_then(|snapshot| {
-                                snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)
-                            })
-                            .map(|tab| (endpoint_id, tab.workspace_id.clone(), false)),
-                        ClientNavigatorTarget::Pane {
-                            endpoint_id,
-                            pane_id,
-                        } => self
-                            .endpoints
-                            .iter()
-                            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
-                            .and_then(|endpoint| endpoint.snapshot.as_deref())
-                            .and_then(|snapshot| {
-                                snapshot.panes.iter().find(|pane| pane.pane_id == pane_id)
-                            })
-                            .map(|pane| (endpoint_id, pane.workspace_id.clone(), false)),
+                        } => Some((endpoint_id, workspace_id)),
                         _ => None,
                     },
                 )
             }
             _ => None,
         });
-        if let (
-            Some((endpoint_id, workspace_id, flip)),
-            Some(ClientShellOverlay::Navigator(navigator)),
-        ) = (toggle, self.overlay.as_mut())
+        if let (Some(workspace_key), Some(ClientShellOverlay::Navigator(navigator))) =
+            (workspace_key, self.overlay.as_mut())
         {
-            let key = (endpoint_id.clone(), workspace_id.clone());
-            if flip {
-                if !navigator.expanded_workspaces.remove(&key) {
-                    navigator.expanded_workspaces.insert(key);
-                }
-            } else {
-                navigator.expanded_workspaces.remove(&key);
+            if !navigator.expanded_workspaces.remove(&workspace_key) {
+                navigator.expanded_workspaces.insert(workspace_key);
             }
-            navigator.selected = Some(ClientNavigatorTarget::Workspace {
-                endpoint_id,
-                workspace_id,
-            });
+            navigator.selected = None;
             navigator.scroll = 0;
         }
     }
@@ -575,7 +344,8 @@ impl ClientShellState {
             .unwrap_or_else(|| "workspace".to_owned());
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "new workspace",
-            input: TextEditor::new(&suggested_name, true),
+            input: suggested_name.clone(),
+            replace_on_type: true,
             target: ClientRenameTarget::NewWorkspace {
                 source_workspace_id,
                 cwd,
@@ -600,7 +370,8 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "rename workspace",
-            input: TextEditor::new(&workspace.label, false),
+            input: workspace.label.clone(),
+            replace_on_type: false,
             target: ClientRenameTarget::Workspace { workspace_id },
         }));
     }
@@ -621,7 +392,8 @@ impl ClientShellState {
         .to_string();
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "new tab",
-            input: TextEditor::new(&default_name, true),
+            input: default_name.clone(),
+            replace_on_type: true,
             target: ClientRenameTarget::NewTab {
                 workspace_id,
                 default_name,
@@ -641,7 +413,8 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "rename tab",
-            input: TextEditor::new(&tab.label, false),
+            input: tab.label.clone(),
+            replace_on_type: false,
             target: ClientRenameTarget::Tab {
                 tab_id: tab.tab_id.clone(),
                 auto_name: !tab.custom_label,
@@ -662,10 +435,8 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "rename pane",
-            input: TextEditor::new(
-                pane.label.as_deref().unwrap_or_default(),
-                pane.label.is_none(),
-            ),
+            input: pane.label.clone().unwrap_or_default(),
+            replace_on_type: pane.label.is_none(),
             target: ClientRenameTarget::Pane {
                 pane_id: pane.pane_id.clone(),
             },
@@ -678,26 +449,23 @@ impl ClientShellState {
         }
         match self.overlay.as_mut() {
             Some(ClientShellOverlay::Rename(rename)) => {
-                rename.input.insert(text);
+                if rename.replace_on_type {
+                    rename.input.clear();
+                    rename.replace_on_type = false;
+                }
+                rename.input.push_str(text);
                 true
             }
             Some(ClientShellOverlay::Help(help)) if help.search_focused => {
-                if help.query.insert(text) {
-                    help.scroll = 0;
-                }
+                help.query
+                    .extend(text.chars().filter(|character| !character.is_control()));
+                help.scroll = 0;
                 true
             }
             Some(ClientShellOverlay::Navigator(navigator)) if navigator.search_focused => {
-                if navigator.query.insert(text) {
-                    navigator.filter = None;
-                    navigator.selected = None;
-                }
-                true
-            }
-            Some(ClientShellOverlay::AgentPicker(picker)) if picker.search_focused => {
-                picker.query.push_str(text);
-                picker.filter = None;
-                picker.selected = None;
+                navigator.query.push_str(text);
+                navigator.filter = None;
+                navigator.selected = None;
                 true
             }
             _ => false,
@@ -887,29 +655,41 @@ impl ClientShellState {
                 return;
             }
             if search_focused {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    if let Some(content_changed) = navigator.query.handle_key(key) {
-                        if content_changed {
-                            navigator.filter = None;
-                            navigator.selected = None;
-                        }
-                        outcome.repaint = true;
-                        return;
-                    }
-                }
                 if code == KeyCode::Up
-                    || code == KeyCode::Char('p') && modifiers == KeyModifiers::CONTROL
+                    || code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL)
                 {
                     self.move_navigator_selection(-1);
                     outcome.repaint = true;
                     return;
                 }
                 if code == KeyCode::Down
-                    || code == KeyCode::Char('n') && modifiers == KeyModifiers::CONTROL
+                    || code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL)
                 {
                     self.move_navigator_selection(1);
                     outcome.repaint = true;
                     return;
+                }
+                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+                    if code == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) {
+                        navigator.query.clear();
+                        navigator.filter = None;
+                        navigator.selected = None;
+                    } else if code == KeyCode::Backspace {
+                        navigator.query.pop();
+                        navigator.filter = None;
+                        navigator.selected = None;
+                    } else if let KeyCode::Char(character) = code {
+                        if modifiers.difference(KeyModifiers::SHIFT).is_empty() {
+                            navigator.filter = None;
+                            if let Some(text) = key.generated_text.as_deref() {
+                                navigator.query.push_str(text);
+                            } else {
+                                navigator.query.push(character);
+                            }
+                            navigator.selected = None;
+                        }
+                    }
+                    outcome.repaint = true;
                 }
                 return;
             }
@@ -965,16 +745,6 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
-            if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_navigator_selection(1);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_navigator_selection(-1);
-                outcome.repaint = true;
-                return;
-            }
             if code == KeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) {
                 self.move_navigator_selection(8);
                 outcome.repaint = true;
@@ -1000,25 +770,6 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
-            let is_upper_f = code == KeyCode::Char('F')
-                || (code == KeyCode::Char('f') && modifiers.contains(KeyModifiers::SHIFT));
-            if is_upper_f && modifiers.difference(KeyModifiers::SHIFT).is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.query.clear();
-                    navigator.filter = None;
-                    let rows = render::client_navigator_rows(
-                        &self.endpoints,
-                        &self.active_endpoint_id,
-                        navigator,
-                    );
-                    navigator.selected = rows
-                        .iter()
-                        .find(|row| row.current)
-                        .map(|row| row.target.clone());
-                }
-                outcome.repaint = true;
-                return;
-            }
             if code == KeyCode::Char('a') && modifiers.is_empty() {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     navigator.query.clear();
@@ -1028,267 +779,8 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
-            if matches!(code, KeyCode::Char('s' | 'c')) && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.expanded_workspaces.clear();
-                    let parent_workspace = match navigator.selected.as_ref() {
-                        Some(ClientNavigatorTarget::Tab {
-                            endpoint_id,
-                            tab_id,
-                        }) => self
-                            .endpoints
-                            .iter()
-                            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
-                            .and_then(|endpoint| endpoint.snapshot.as_deref())
-                            .and_then(|snapshot| {
-                                snapshot.tabs.iter().find(|tab| &tab.tab_id == tab_id)
-                            })
-                            .map(|tab| (endpoint_id.clone(), tab.workspace_id.clone())),
-                        Some(ClientNavigatorTarget::Pane {
-                            endpoint_id,
-                            pane_id,
-                        }) => self
-                            .endpoints
-                            .iter()
-                            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
-                            .and_then(|endpoint| endpoint.snapshot.as_deref())
-                            .and_then(|snapshot| {
-                                snapshot.panes.iter().find(|pane| &pane.pane_id == pane_id)
-                            })
-                            .map(|pane| (endpoint_id.clone(), pane.workspace_id.clone())),
-                        _ => None,
-                    };
-                    if let Some((endpoint_id, workspace_id)) = parent_workspace {
-                        navigator.selected = Some(ClientNavigatorTarget::Workspace {
-                            endpoint_id,
-                            workspace_id,
-                        });
-                    }
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('e') && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
-                    navigator.expanded_workspaces =
-                        super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
-                            .flat_map(|endpoint| {
-                                endpoint.snapshot.workspaces.iter().map(move |workspace| {
-                                    (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
-                                })
-                            })
-                            .collect();
-                }
-                outcome.repaint = true;
-                return;
-            }
             if code == KeyCode::Char(' ') && modifiers.is_empty() {
                 self.toggle_selected_navigator_workspace();
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('x') && modifiers.is_empty() {
-                self.close_navigator_selection(outcome);
-                return;
-            }
-            return;
-        }
-
-        if matches!(self.overlay, Some(ClientShellOverlay::AgentPicker(_))) {
-            let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-            let search_focused = matches!(
-                self.overlay,
-                Some(ClientShellOverlay::AgentPicker(ClientAgentPickerOverlay {
-                    search_focused: true,
-                    ..
-                }))
-            );
-            if code == KeyCode::Esc {
-                if search_focused {
-                    if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                        picker.search_focused = false;
-                    }
-                } else {
-                    self.overlay = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Enter {
-                self.accept_agent_picker_selection(outcome);
-                return;
-            }
-            if search_focused {
-                if code == KeyCode::Up
-                    || code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL)
-                {
-                    self.move_agent_picker_selection(-1);
-                    outcome.repaint = true;
-                    return;
-                }
-                if code == KeyCode::Down
-                    || code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL)
-                {
-                    self.move_agent_picker_selection(1);
-                    outcome.repaint = true;
-                    return;
-                }
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    if code == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) {
-                        picker.query.clear();
-                        picker.filter = None;
-                        picker.selected = None;
-                    } else if code == KeyCode::Backspace {
-                        picker.query.pop();
-                        picker.filter = None;
-                        picker.selected = None;
-                    } else if code == KeyCode::Char('w')
-                        && modifiers.contains(KeyModifiers::CONTROL)
-                    {
-                        let trimmed = picker.query.trim_end().to_owned();
-                        let cut = trimmed
-                            .char_indices()
-                            .rev()
-                            .find(|(_, character)| character.is_whitespace())
-                            .map(|(index, character)| index + character.len_utf8())
-                            .unwrap_or(0);
-                        picker.query.truncate(cut);
-                        picker.filter = None;
-                        picker.selected = None;
-                    } else if let KeyCode::Char(character) = code {
-                        if modifiers.difference(KeyModifiers::SHIFT).is_empty() {
-                            picker.filter = None;
-                            if let Some(text) = key.generated_text.as_deref() {
-                                picker.query.push_str(text);
-                            } else {
-                                picker.query.push(character);
-                            }
-                            picker.selected = None;
-                        }
-                    }
-                    outcome.repaint = true;
-                }
-                return;
-            }
-            if code == KeyCode::Backspace && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    if picker.filter.take().is_some() {
-                        let rows = render::client_agent_picker_rows(
-                            &self.endpoints,
-                            &self.active_endpoint_id,
-                            self.config.agent_panel_sort,
-                            picker,
-                        );
-                        picker.selected = rows
-                            .iter()
-                            .find(|row| row.current)
-                            .or_else(|| rows.first())
-                            .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()));
-                    }
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Home && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    picker.selected = None;
-                    picker.scroll = 0;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if matches!(code, KeyCode::End | KeyCode::Char('G')) && modifiers.is_empty() {
-                let last = self.overlay.as_ref().and_then(|overlay| match overlay {
-                    ClientShellOverlay::AgentPicker(picker) => {
-                        let rows = render::client_agent_picker_rows(
-                            &self.endpoints,
-                            &self.active_endpoint_id,
-                            self.config.agent_panel_sort,
-                            picker,
-                        );
-                        rows.last()
-                            .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()))
-                    }
-                    _ => None,
-                });
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    picker.selected = last;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('/') && modifiers.is_empty() {
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    picker.search_focused = true;
-                    picker.filter = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            if matches!(code, KeyCode::Down | KeyCode::Char('j')) && modifiers.is_empty() {
-                self.move_agent_picker_selection(1);
-                outcome.repaint = true;
-                return;
-            }
-            if matches!(code, KeyCode::Up | KeyCode::Char('k')) && modifiers.is_empty() {
-                self.move_agent_picker_selection(-1);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('n') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_agent_picker_selection(1);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('p') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_agent_picker_selection(-1);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_agent_picker_selection(8);
-                outcome.repaint = true;
-                return;
-            }
-            if code == KeyCode::Char('u') && modifiers.contains(KeyModifiers::CONTROL) {
-                self.move_agent_picker_selection(-8);
-                outcome.repaint = true;
-                return;
-            }
-            if let Some(filter) = match code {
-                KeyCode::Char('b') if modifiers.is_empty() => Some(ClientNavigatorFilter::Blocked),
-                KeyCode::Char('w') if modifiers.is_empty() => Some(ClientNavigatorFilter::Working),
-                KeyCode::Char('i') if modifiers.is_empty() => Some(ClientNavigatorFilter::Idle),
-                KeyCode::Char('d') if modifiers.is_empty() => Some(ClientNavigatorFilter::Done),
-                _ => None,
-            } {
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    picker.query.clear();
-                    picker.filter = Some(filter);
-                    picker.selected = None;
-                }
-                outcome.repaint = true;
-                return;
-            }
-            let is_f_filter_clear = (matches!(code, KeyCode::Char('F'))
-                || (matches!(code, KeyCode::Char('f')) && modifiers.contains(KeyModifiers::SHIFT)))
-                && modifiers.difference(KeyModifiers::SHIFT).is_empty();
-            if is_f_filter_clear {
-                if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut() {
-                    picker.query.clear();
-                    picker.filter = None;
-                    let rows = render::client_agent_picker_rows(
-                        &self.endpoints,
-                        &self.active_endpoint_id,
-                        self.config.agent_panel_sort,
-                        picker,
-                    );
-                    picker.selected = rows
-                        .iter()
-                        .find(|row| row.current)
-                        .or_else(|| rows.first())
-                        .map(|row| (row.endpoint_id.clone(), row.pane_id.clone()));
-                }
                 outcome.repaint = true;
                 return;
             }
@@ -1306,15 +798,6 @@ impl ClientShellState {
                 }))
             );
             if search_focused {
-                if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-                    if let Some(content_changed) = help.query.handle_key(key) {
-                        if content_changed {
-                            help.scroll = 0;
-                        }
-                        outcome.repaint = true;
-                        return;
-                    }
-                }
                 match code {
                     KeyCode::Esc => {
                         if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
@@ -1324,17 +807,20 @@ impl ClientShellState {
                         }
                     }
                     KeyCode::Enter => self.overlay = None,
-                    KeyCode::Up
-                    | KeyCode::Down
-                    | KeyCode::PageUp
-                    | KeyCode::PageDown
-                    | KeyCode::Char('n' | 'p')
-                        if !matches!(code, KeyCode::Char(_))
-                            || modifiers == KeyModifiers::CONTROL =>
-                    {
+                    KeyCode::Home => {
+                        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+                            help.scroll = 0;
+                        }
+                    }
+                    KeyCode::End => {
+                        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+                            help.scroll = self.hits.help_max_scroll;
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
                         let delta = match code {
-                            KeyCode::Up | KeyCode::Char('p') => -1,
-                            KeyCode::Down | KeyCode::Char('n') => 1,
+                            KeyCode::Up => -1,
+                            KeyCode::Down => 1,
                             KeyCode::PageUp => -8,
                             KeyCode::PageDown => 8,
                             _ => unreachable!(),
@@ -1346,7 +832,26 @@ impl ClientShellState {
                                 .min(self.hits.help_max_scroll);
                         }
                     }
-                    _ => {}
+                    KeyCode::Backspace => {
+                        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+                            help.query.pop();
+                            help.scroll = 0;
+                        }
+                    }
+                    KeyCode::Char('u') if modifiers == KeyModifiers::CONTROL => {
+                        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+                            help.query.clear();
+                            help.scroll = 0;
+                        }
+                    }
+                    _ => {
+                        if let Some(character) = text_character {
+                            if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+                                help.query.push(character);
+                                help.scroll = 0;
+                            }
+                        }
+                    }
                 }
                 outcome.repaint = true;
                 return;
@@ -1398,82 +903,25 @@ impl ClientShellState {
         }
 
         if matches!(self.overlay, Some(ClientShellOverlay::ConfirmClose(_))) {
-            if self.confirm_accept_pressed(key) {
+            if key.code == KeyCode::Enter {
                 let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
                     return;
                 };
-                let ClientConfirmCloseOverlay {
-                    target,
-                    return_to_navigator,
-                    ..
-                } = confirm;
-                match target {
-                    ClientConfirmCloseTarget::Workspace {
-                        endpoint_id,
-                        workspace_id,
-                    } => {
-                        self.push_endpoint_method_to_with_kind(
-                            &endpoint_id,
-                            crate::api::schema::Method::WorkspaceClose(
-                                crate::api::schema::WorkspaceCloseParams {
-                                    workspace_id,
-                                    close_group: true,
-                                },
-                            ),
-                            PendingEndpointKind::Generic,
-                            outcome,
-                        );
-                    }
-                    ClientConfirmCloseTarget::Pane {
-                        endpoint_id,
-                        pane_id,
-                    } => {
-                        self.push_endpoint_method_to_with_kind(
-                            &endpoint_id,
-                            crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
-                                pane_id,
-                            }),
-                            PendingEndpointKind::Generic,
-                            outcome,
-                        );
-                    }
-                    ClientConfirmCloseTarget::Tab {
-                        endpoint_id,
-                        tab_id,
-                    } => {
-                        self.push_endpoint_method_to_with_kind(
-                            &endpoint_id,
-                            crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
-                                tab_id,
-                            }),
-                            PendingEndpointKind::Generic,
-                            outcome,
-                        );
-                    }
-                }
-                self.restore_navigator_after_confirm(return_to_navigator);
+                self.push_endpoint_method(
+                    crate::api::schema::Method::WorkspaceClose(
+                        crate::api::schema::WorkspaceCloseParams {
+                            workspace_id: confirm.workspace_id,
+                            close_group: true,
+                        },
+                    ),
+                    outcome,
+                );
                 outcome.repaint = true;
             } else if key.code == KeyCode::Esc {
-                let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.take() else {
-                    return;
-                };
-                let workspace_close =
-                    matches!(confirm.target, ClientConfirmCloseTarget::Workspace { .. });
-                match confirm.return_to_navigator {
-                    Some(navigator) => {
-                        self.overlay = Some(ClientShellOverlay::Navigator(navigator));
-                    }
-                    None => {
-                        self.overlay = None;
-                        if workspace_close {
-                            self.mode = ClientShellMode::Navigate;
-                            self.navigate_workspace_id = self.focused_navigation_target();
-                            self.navigate_agent = self.initial_agent_target();
-                            self.navigate_section = SidebarNavSection::Spaces;
-                            self.reveal_navigation_workspace = true;
-                        }
-                    }
-                }
+                self.overlay = None;
+                self.mode = ClientShellMode::Navigate;
+                self.navigate_workspace_id = self.focused_navigation_target();
+                self.reveal_navigation_workspace = true;
                 outcome.repaint = true;
             }
             return;
@@ -1491,26 +939,53 @@ impl ClientShellState {
             outcome.repaint = true;
             return;
         }
-        if key
-            .generated_text
-            .as_deref()
-            .is_some_and(|text| !text.is_empty())
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            rename.input.clear();
+            rename.replace_on_type = false;
+            outcome.repaint = true;
+            return;
+        }
+        if (key.code == KeyCode::Char('u') && key.modifiers.contains(KeyModifiers::CONTROL))
+            || (key.code == KeyCode::Backspace && key.modifiers.contains(KeyModifiers::SUPER))
         {
-            outcome.repaint |= rename.input.handle_key(key).is_some();
-            return;
-        }
-        if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
             rename.input.clear();
+            rename.replace_on_type = false;
             outcome.repaint = true;
             return;
         }
-        if key.code == KeyCode::Backspace && key.modifiers.contains(KeyModifiers::SUPER) {
-            rename.input.clear();
+        if key.code == KeyCode::Backspace
+            && (key.modifiers.contains(KeyModifiers::CONTROL)
+                || key.modifiers.contains(KeyModifiers::ALT))
+            || matches!(key.code, KeyCode::Char('h' | 'w'))
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            delete_overlay_word(rename);
             outcome.repaint = true;
             return;
         }
-        if rename.input.handle_key(key).is_some() {
+        if key.code == KeyCode::Backspace {
+            if rename.replace_on_type {
+                rename.input.clear();
+                rename.replace_on_type = false;
+            } else {
+                rename.input.pop();
+            }
             outcome.repaint = true;
+            return;
+        }
+        if let KeyCode::Char(character) = key.code {
+            if key.modifiers.difference(KeyModifiers::SHIFT).is_empty() {
+                if rename.replace_on_type {
+                    rename.input.clear();
+                    rename.replace_on_type = false;
+                }
+                if let Some(text) = key.generated_text.as_deref() {
+                    rename.input.push_str(text);
+                } else {
+                    rename.input.push(character);
+                }
+                outcome.repaint = true;
+            }
         }
     }
 
@@ -1559,20 +1034,12 @@ impl ClientShellState {
                 tab_id,
                 auto_name,
                 original_name,
-            } => {
-                // Empty input clears the custom name and falls back to the
-                // default numbered label; only an unchanged auto name is a no-op.
-                if auto_name && trimmed == original_name {
-                    None
-                } else {
-                    Some(crate::api::schema::Method::TabRename(
-                        crate::api::schema::TabRenameParams {
-                            tab_id,
-                            label: trimmed.to_owned(),
-                        },
-                    ))
-                }
-            }
+            } => (!(trimmed.is_empty() || auto_name && trimmed == original_name)).then(|| {
+                crate::api::schema::Method::TabRename(crate::api::schema::TabRenameParams {
+                    tab_id,
+                    label: trimmed.to_owned(),
+                })
+            }),
             ClientRenameTarget::Pane { pane_id } => Some(crate::api::schema::Method::PaneRename(
                 crate::api::schema::PaneRenameParams {
                     pane_id,
@@ -1586,29 +1053,8 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    /// Enter always accepts destructive confirmations; `keys.confirm_accept`
-    /// adds an optional direct-key alias (e.g. "y"). Modal-only, so plain keys are safe.
-    pub(super) fn confirm_accept_pressed(&self, key: &crate::input::TerminalKey) -> bool {
-        key.code == KeyCode::Enter
-            || self
-                .config
-                .keybinds
-                .keybinds
-                .confirm_accept
-                .matches_direct_key(key)
-    }
-
-    pub(super) fn open_confirm_close_overlay(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        workspace_id: String,
-    ) {
-        let Some(snapshot) = self
-            .endpoints
-            .iter()
-            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
-            .and_then(|endpoint| endpoint.snapshot.as_deref())
-        else {
+    pub(super) fn open_confirm_close_overlay(&mut self, workspace_id: String) {
+        let Some(snapshot) = self.snapshot.as_deref() else {
             return;
         };
         let Some(workspace) = snapshot
@@ -1660,69 +1106,13 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
-                target: ClientConfirmCloseTarget::Workspace {
-                    endpoint_id: endpoint_id.clone(),
-                    workspace_id,
-                },
+                workspace_id,
                 title: if closes_group {
                     "Close worktree group?".to_owned()
                 } else {
                     "Close workspace?".to_owned()
                 },
                 detail: format!("{} — {scope}", workspace.label),
-                return_to_navigator: self.navigator_for_confirm(),
-            },
-        ));
-    }
-
-    pub(super) fn open_confirm_pane_close_overlay(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        pane_id: String,
-    ) {
-        let detail = self
-            .endpoints
-            .iter()
-            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
-            .and_then(|endpoint| endpoint.snapshot.as_deref())
-            .and_then(|snapshot| snapshot.panes.iter().find(|pane| pane.pane_id == pane_id))
-            .map(|pane| pane.label.clone().unwrap_or_else(|| pane.pane_id.clone()))
-            .unwrap_or_else(|| pane_id.clone());
-        self.overlay = Some(ClientShellOverlay::ConfirmClose(
-            ClientConfirmCloseOverlay {
-                target: ClientConfirmCloseTarget::Pane {
-                    endpoint_id: endpoint_id.clone(),
-                    pane_id,
-                },
-                title: "Close pane?".to_owned(),
-                detail,
-                return_to_navigator: self.navigator_for_confirm(),
-            },
-        ));
-    }
-
-    pub(super) fn open_confirm_tab_close_overlay(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        tab_id: String,
-    ) {
-        let detail = self
-            .endpoints
-            .iter()
-            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
-            .and_then(|endpoint| endpoint.snapshot.as_deref())
-            .and_then(|snapshot| snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id))
-            .map(|tab| tab.label.clone())
-            .unwrap_or_else(|| tab_id.clone());
-        self.overlay = Some(ClientShellOverlay::ConfirmClose(
-            ClientConfirmCloseOverlay {
-                target: ClientConfirmCloseTarget::Tab {
-                    endpoint_id: endpoint_id.clone(),
-                    tab_id,
-                },
-                title: "Close tab?".to_owned(),
-                detail,
-                return_to_navigator: self.navigator_for_confirm(),
             },
         ));
     }

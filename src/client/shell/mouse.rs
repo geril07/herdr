@@ -11,21 +11,7 @@ impl ClientShellState {
             self.config.sidebar_max_width,
         )
         .unwrap_or((18, 36));
-        let width = if self.config.sidebar_on_right() {
-            let total_cols = self
-                .last_composed_size
-                .map(|(cols, _)| cols)
-                .unwrap_or_else(|| {
-                    self.hits
-                        .sidebar_divider
-                        .x
-                        .saturating_add(self.sidebar_width)
-                });
-            total_cols.saturating_sub(column)
-        } else {
-            column.saturating_add(1)
-        }
-        .clamp(min, max);
+        let width = column.saturating_add(1).clamp(min, max);
         if self.sidebar_width != width {
             self.sidebar_width = width;
             self.sidebar_width_manual = true;
@@ -669,21 +655,14 @@ impl ClientShellState {
         self.update_link_hover(mouse, outcome);
         let point = (mouse.column, mouse.row);
         if self.mode == ClientShellMode::Navigate
-            && self.navigation_preview_action_blocked()
+            && self.workspace_preview_action_blocked()
             && self.overlay.is_none()
             && !self.mobile_layout_active()
             && mouse.kind == MouseEventKind::Down(MouseButton::Left)
         {
             self.mode = self.copy_or_terminal_mode();
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
             outcome.repaint = true;
-        }
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
-            && !self.hits.config_diagnostic_dismiss.is_empty()
-            && super::contains(self.hits.config_diagnostic_dismiss, point)
-        {
-            self.dismiss_config_diagnostic(outcome);
-            return;
         }
         if matches!(self.overlay, Some(ClientShellOverlay::Onboarding)) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left)
@@ -1672,54 +1651,6 @@ impl ClientShellState {
             }
             return;
         }
-        if matches!(self.overlay, Some(ClientShellOverlay::AgentPicker(_))) {
-            let row_hit = self
-                .hits
-                .agent_picker_rows
-                .iter()
-                .find(|(rect, _, _)| super::contains(*rect, point))
-                .cloned();
-            match mouse.kind {
-                MouseEventKind::Moved => {
-                    if let Some((_, endpoint_id, pane_id)) = row_hit {
-                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
-                        {
-                            picker.selected = Some((endpoint_id, pane_id));
-                        }
-                        outcome.repaint = true;
-                    }
-                }
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if super::contains(self.hits.agent_picker_search, point) {
-                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
-                        {
-                            picker.search_focused = true;
-                            picker.filter = None;
-                        }
-                        outcome.repaint = true;
-                    } else if let Some((_, endpoint_id, pane_id)) = row_hit {
-                        if let Some(ClientShellOverlay::AgentPicker(picker)) = self.overlay.as_mut()
-                        {
-                            picker.selected = Some((endpoint_id, pane_id));
-                        }
-                        self.accept_agent_picker_selection(outcome);
-                    } else if !super::contains(self.hits.agent_picker_popup, point) {
-                        self.overlay = None;
-                        outcome.repaint = true;
-                    }
-                }
-                MouseEventKind::ScrollUp => {
-                    self.move_agent_picker_selection(-3);
-                    outcome.repaint = true;
-                }
-                MouseEventKind::ScrollDown => {
-                    self.move_agent_picker_selection(3);
-                    outcome.repaint = true;
-                }
-                _ => {}
-            }
-            return;
-        }
         if self.overlay.is_some() {
             if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
                 return;
@@ -1732,53 +1663,15 @@ impl ClientShellState {
                         else {
                             return;
                         };
-                        let ClientConfirmCloseOverlay {
-                            target,
-                            return_to_navigator,
-                            ..
-                        } = confirm;
-                        match target {
-                            ClientConfirmCloseTarget::Workspace {
-                                endpoint_id,
-                                workspace_id,
-                            } => {
-                                self.push_endpoint_method_to(
-                                    &endpoint_id,
-                                    crate::api::schema::Method::WorkspaceClose(
-                                        crate::api::schema::WorkspaceCloseParams {
-                                            workspace_id,
-                                            close_group: true,
-                                        },
-                                    ),
-                                    outcome,
-                                );
-                            }
-                            ClientConfirmCloseTarget::Pane {
-                                endpoint_id,
-                                pane_id,
-                            } => {
-                                self.push_endpoint_method_to(
-                                    &endpoint_id,
-                                    crate::api::schema::Method::PaneClose(
-                                        crate::api::schema::PaneTarget { pane_id },
-                                    ),
-                                    outcome,
-                                );
-                            }
-                            ClientConfirmCloseTarget::Tab {
-                                endpoint_id,
-                                tab_id,
-                            } => {
-                                self.push_endpoint_method_to(
-                                    &endpoint_id,
-                                    crate::api::schema::Method::TabClose(
-                                        crate::api::schema::TabTarget { tab_id },
-                                    ),
-                                    outcome,
-                                );
-                            }
-                        }
-                        self.restore_navigator_after_confirm(return_to_navigator);
+                        self.push_endpoint_method(
+                            crate::api::schema::Method::WorkspaceClose(
+                                crate::api::schema::WorkspaceCloseParams {
+                                    workspace_id: confirm.workspace_id,
+                                    close_group: true,
+                                },
+                            ),
+                            outcome,
+                        );
                         outcome.repaint = true;
                     }
                     _ => {}
@@ -1789,13 +1682,7 @@ impl ClientShellState {
                     outcome.repaint = true;
                 }
             } else {
-                // Dismissing a confirm dialog returns to the navigator it
-                // was opened from; every other overlay just closes.
-                let return_to_navigator = match self.overlay.take() {
-                    Some(ClientShellOverlay::ConfirmClose(confirm)) => confirm.return_to_navigator,
-                    _ => None,
-                };
-                self.overlay = return_to_navigator.map(ClientShellOverlay::Navigator);
+                self.overlay = None;
                 outcome.repaint = true;
             }
             return;

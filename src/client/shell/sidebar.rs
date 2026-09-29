@@ -6,18 +6,8 @@ use ratatui::{
 
 pub(in crate::client::shell) fn collapsed_sidebar_sections(
     area: Rect,
-    on_right: bool,
 ) -> (Rect, Option<u16>, Rect) {
-    let content = if on_right {
-        Rect::new(
-            area.x.saturating_add(1),
-            area.y,
-            area.width.saturating_sub(1),
-            area.height,
-        )
-    } else {
-        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
-    };
+    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.is_empty() {
         return (Rect::default(), None, Rect::default());
     }
@@ -39,36 +29,31 @@ pub(crate) fn render_collapsed_sidebar(
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
-    collapsed_groups: &HashSet<String>,
     selected_workspace_id: Option<&str>,
-    selected_agent_pane_id: Option<&str>,
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    let on_right = config.sidebar_on_right();
-    render_sidebar_background(buffer, area, palette, on_right);
-    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area, on_right);
-    let entries = workspace_entries(snapshot, collapsed_groups);
-    for (position, entry) in entries
+    render_sidebar_background(buffer, area, palette);
+    let (workspace_area, divider_y, detail_area) = collapsed_sidebar_sections(area);
+    for (index, workspace) in snapshot
+        .workspaces
         .iter()
         .take(workspace_area.height as usize)
         .enumerate()
     {
-        let Some(workspace) = snapshot.workspaces.get(entry.index) else {
-            continue;
-        };
         let rect = Rect::new(
             workspace_area.x,
-            workspace_area.y + position as u16,
+            workspace_area.y + index as u16,
             workspace_area.width,
             1,
         );
         let selected = selected_workspace_id == Some(workspace.workspace_id.as_str());
-        let selection_background = if palette.selection_bg == ratatui::style::Color::Reset {
-            palette.active_row_bg
-        } else {
-            palette.selection_bg
-        };
+        let selection_background =
+            if workspace.focused && palette.selection_bg == ratatui::style::Color::Reset {
+                palette.active_row_bg
+            } else {
+                palette.selection_bg
+            };
         if selected {
             buffer.set_style(rect, Style::default().bg(selection_background));
         } else if workspace.focused {
@@ -83,20 +68,15 @@ pub(crate) fn render_collapsed_sidebar(
         } else {
             Style::default().fg(palette.overlay0)
         };
-        let number_style = if entry.indented {
-            number_style.add_modifier(Modifier::DIM)
-        } else {
-            number_style
-        };
         put_text(
             buffer,
             rect.x,
             rect.y,
             rect.width.min(2),
-            &format!("{:<2}", position + 1),
+            &format!("{:<2}", index + 1),
             number_style,
         );
-        let status = displayed_workspace_status(snapshot, workspace, collapsed_groups);
+        let status = workspace.agent_status;
         put_text(
             buffer,
             rect.x.saturating_add(2),
@@ -109,7 +89,7 @@ pub(crate) fn render_collapsed_sidebar(
             rect,
             endpoint_id: ClientEndpointId::Local,
             workspace_id: workspace.workspace_id.clone(),
-            indented: entry.indented,
+            indented: false,
             group_toggle: None,
         });
     }
@@ -149,15 +129,7 @@ pub(crate) fn render_collapsed_sidebar(
             detail_content.width,
             1,
         );
-        let selected = selected_agent_pane_id == Some(pane_id.as_str());
-        if selected {
-            let background = if palette.selection_bg == ratatui::style::Color::Reset {
-                palette.active_row_bg
-            } else {
-                palette.selection_bg
-            };
-            buffer.set_style(rect, Style::default().bg(background));
-        } else if agent.focused {
+        if agent.focused {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
         put_text(
@@ -197,7 +169,7 @@ pub(crate) fn render_collapsed_sidebar(
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        if on_right { "«" } else { "»" },
+        "»",
         if super::super::global_menu::global_menu_attention(snapshot) {
             Style::default()
                 .fg(palette.accent)
@@ -217,19 +189,16 @@ pub(crate) fn render_sidebar(
     hits: &mut ShellHitMap,
 ) {
     let palette = &config.palette;
-    let on_right = config.sidebar_on_right();
-    render_sidebar_background(buffer, area, palette, on_right);
+    render_sidebar_background(buffer, area, palette);
     hits.sidebar_divider = if area.is_empty() {
         Rect::default()
-    } else if on_right {
-        Rect::new(area.x, area.y, 1, area.height)
     } else {
         Rect::new(area.right().saturating_sub(1), area.y, 1, area.height)
     };
     let (workspace_area, detail_area) =
-        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split, on_right);
+        crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
-        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split, on_right);
+        crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
     put_text(
         buffer,
         workspace_area.x,
@@ -330,12 +299,7 @@ pub(crate) fn render_sidebar(
         });
         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
         if selected {
-            let selection = if palette.selection_bg == ratatui::style::Color::Reset {
-                palette.active_row_bg
-            } else {
-                palette.selection_bg
-            };
-            buffer.set_style(rect, Style::default().bg(selection));
+            buffer.set_style(rect, Style::default().bg(palette.selection_bg));
         } else if dragged {
             buffer.set_style(rect, Style::default().bg(palette.surface1));
         } else if workspace.focused {
@@ -456,31 +420,21 @@ pub(crate) fn render_sidebar(
         snapshot,
         config,
         state.agent_scroll,
-        state.selected_agent.map(|target| target.pane_id.as_str()),
         hits,
     );
 
-    hits.sidebar_toggle = if on_right {
-        Rect::new(
-            area.x.saturating_add(1),
-            area.bottom().saturating_sub(1),
-            u16::from(area.width > 1),
-            u16::from(area.height > 0),
-        )
-    } else {
-        Rect::new(
-            area.right().saturating_sub(2),
-            area.bottom().saturating_sub(1),
-            u16::from(area.width > 1),
-            u16::from(area.height > 0),
-        )
-    };
+    hits.sidebar_toggle = Rect::new(
+        area.right().saturating_sub(2),
+        area.bottom().saturating_sub(1),
+        u16::from(area.width > 1),
+        u16::from(area.height > 0),
+    );
     put_text(
         buffer,
         hits.sidebar_toggle.x,
         hits.sidebar_toggle.y,
         hits.sidebar_toggle.width,
-        if on_right { "»" } else { "«" },
+        "«",
         Style::default().fg(palette.overlay0),
     );
 }
@@ -763,11 +717,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
     }
 
     let background = if selected {
-        Some(if palette.selection_bg == ratatui::style::Color::Reset {
-            palette.active_row_bg
-        } else {
-            palette.selection_bg
-        })
+        Some(palette.selection_bg)
     } else if dragged {
         Some(palette.surface1)
     } else if endpoint_active && workspace.focused {

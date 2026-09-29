@@ -146,55 +146,6 @@ fn navigation_highlights_only_the_preview_and_activates_on_enter() {
 }
 
 #[test]
-fn configured_open_alias_activates_the_selected_workspace() {
-    let (mut state, _) = navigation_state(workspaces(2));
-    state.config.keybinds.keybinds.navigate.workspace_open =
-        crate::config::ActionKeybinds::direct("o");
-    state.compose(100, 28).unwrap();
-    enter_navigation(&mut state);
-    preview_key(&mut state, b"\x1b[B");
-
-    let open = state.handle_input_bytes(b"o");
-    let [ClientShellAction::Endpoint { request, .. }] = &open.actions[..] else {
-        panic!("open alias should focus the selected workspace");
-    };
-    assert!(matches!(
-        &request.method,
-        crate::api::schema::Method::WorkspaceFocus(target)
-            if target.workspace_id == "ws_2"
-    ));
-    assert_eq!(state.mode, ClientShellMode::Terminal);
-    assert!(state.navigate_workspace_id.is_none());
-}
-
-#[test]
-fn navigate_mode_does_not_run_custom_commands() {
-    let (mut state, _) = navigation_state(workspaces(2));
-    state.config.keybinds.keybinds.open_notification_target = Default::default();
-    state
-        .config
-        .keybinds
-        .keybinds
-        .custom_commands
-        .push(crate::config::CustomCommandKeybind {
-            bindings: crate::config::ActionKeybinds::prefix("o"),
-            label: "prefix+o".into(),
-            command: "agent-overview".into(),
-            action: crate::config::CustomCommandAction::Popup,
-            description: None,
-            width: None,
-            height: None,
-        });
-    state.compose(100, 28).unwrap();
-    enter_navigation(&mut state);
-
-    let open = state.handle_input_bytes(b"o");
-    assert!(open.actions.is_empty());
-    assert!(open.requests.is_empty());
-    assert_eq!(state.mode, ClientShellMode::Navigate);
-}
-
-#[test]
 fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
     let (mut state, remote) = state_with_remote();
     state.compose(100, 28).unwrap();
@@ -207,6 +158,7 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
             b"D",
             b"\x1b[D",
             b"\x1b[C",
+            b"\t",
             b"1",
             b"c",
             b"N",
@@ -215,14 +167,6 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
             assert!(state.overlay.is_none());
             assert_eq!(state.mode, ClientShellMode::Navigate);
         }
-        // Tab is a recovery path between sections even when the
-        // workspace preview is foreign.
-        preview_key(&mut state, b"\t");
-        assert_eq!(state.navigate_section, SidebarNavSection::Agents);
-        assert_eq!(state.mode, ClientShellMode::Navigate);
-        preview_key(&mut state, b"\x1b[Z");
-        assert_eq!(state.navigate_section, SidebarNavSection::Spaces);
-        assert_eq!(state.mode, ClientShellMode::Navigate);
     }
     assert_selected(&state, &remote, "ws_1");
     let mut remote_snapshot = workspaces(2);
@@ -286,7 +230,7 @@ fn foreign_workspace_preview_blocks_paste_into_hidden_copy_search() {
         query: "original".into(),
     });
     preview_key(&mut state, b"\x1b[B");
-    assert!(state.navigation_preview_action_blocked());
+    assert!(state.workspace_preview_action_blocked());
     assert!(!state.modal_paste_target_active());
     let key = crate::input::TerminalKey::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
     assert!(!state.handle_modal_paste_shortcut_with(
@@ -334,63 +278,25 @@ fn mouse_clicks_cancel_remote_workspace_navigation() {
 }
 
 #[test]
-fn single_machine_compact_navigation_hides_collapsed_group_children() {
+fn single_machine_compact_navigation_includes_visible_collapsed_group_children() {
     let (mut state, _) = navigation_state(grouped_workspaces());
     state.set_endpoint_catalog(&[]);
     state.toggle_collapsed_group(&ClientEndpointId::Local, "repo".into());
     state.sidebar_collapsed = true;
     state.compose(100, 28).unwrap();
-    workspace_rect(&state, &ClientEndpointId::Local, "ws_1");
-    workspace_rect(&state, &ClientEndpointId::Local, "ws_2");
-    assert!(
-        state
-            .hits
-            .workspaces
-            .iter()
-            .all(|hit| hit.workspace_id != "ws_3"),
-        "collapsed child must stay hidden in collapsed sidebar"
-    );
-    enter_navigation(&mut state);
-    preview_key(&mut state, b"\x1b[B");
-    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
-    preview_key(&mut state, b"\x1b[B");
-    assert_selected(&state, &ClientEndpointId::Local, "ws_1");
-}
-
-#[test]
-fn single_machine_compact_navigation_shows_focused_collapsed_child() {
-    let mut grouped = grouped_workspaces();
-    for workspace in &mut grouped.workspaces {
-        workspace.focused = workspace.workspace_id == "ws_3";
-    }
-    grouped.focused_workspace_id = Some("ws_3".into());
-    let (mut state, _) = navigation_state(grouped);
-    state.set_endpoint_catalog(&[]);
-    state.toggle_collapsed_group(&ClientEndpointId::Local, "repo".into());
-    state.sidebar_collapsed = true;
-    state.compose(100, 28).unwrap();
     workspace_rect(&state, &ClientEndpointId::Local, "ws_3");
-    assert!(
-        state
-            .hits
-            .workspaces
-            .iter()
-            .find(|hit| hit.workspace_id == "ws_3")
-            .is_some_and(|hit| hit.indented),
-        "focused collapsed child stays visible and marked indented"
-    );
     enter_navigation(&mut state);
-    preview_key(&mut state, b"\x1b[B");
-    assert_selected(&state, &ClientEndpointId::Local, "ws_2");
-    preview_key(&mut state, b"\x1b[B");
-    assert_selected(&state, &ClientEndpointId::Local, "ws_1");
+    for id in ["ws_2", "ws_3"] {
+        preview_key(&mut state, b"\x1b[B");
+        assert_selected(&state, &ClientEndpointId::Local, id);
+    }
 }
 
 #[test]
 fn workspace_navigation_respects_each_machines_visible_worktree_groups() {
     for (cols, compact, unavailable, show_child) in [
         (100, false, false, false),
-        (100, true, false, false),
+        (100, true, false, true),
         (44, false, false, true),
         (44, true, true, false),
     ] {
@@ -402,7 +308,11 @@ fn workspace_navigation_respects_each_machines_visible_worktree_groups() {
         }
         state.compose(cols, 28).unwrap();
         enter_navigation(&mut state);
-        let local = ["ws_3", "ws_2"];
+        let local = if compact && !unavailable {
+            ["ws_2", "ws_3"]
+        } else {
+            ["ws_3", "ws_2"]
+        };
         let remote_ids: &[&str] = if !show_child {
             &["ws_1", "ws_2"]
         } else if compact {

@@ -7,22 +7,12 @@ pub(super) fn render_collapsed(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
-    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
     let rows = agent_rows(endpoints, active_endpoint_id, config);
     for (index, row) in rows.into_iter().take(area.height as usize).enumerate() {
         let rect = Rect::new(area.x, area.y + index as u16, area.width, 1);
-        let selected = selected_agent
-            .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
-        if selected {
-            let background = if config.palette.selection_bg == ratatui::style::Color::Reset {
-                config.palette.active_row_bg
-            } else {
-                config.palette.selection_bg
-            };
-            buffer.set_style(rect, Style::default().bg(background));
-        } else if row.agent.focused {
+        if row.agent.focused {
             buffer.set_style(rect, Style::default().bg(config.palette.active_row_bg));
         }
         let initial = row.machine_label.chars().next().unwrap_or('?');
@@ -60,7 +50,6 @@ pub(super) fn render_expanded(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
-    selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
     if !super::agent_sidebar::render_agent_panel_header(
@@ -83,9 +72,7 @@ pub(super) fn render_expanded(
         hits,
         |row| row.agent.rows.len(),
         |buffer, rect, row, hits| {
-            let selected = selected_agent
-                .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config, selected);
+            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
             if row.stale {
                 buffer.set_style(
                     rect,
@@ -112,7 +99,6 @@ fn agent_rows(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
 ) -> Vec<EndpointAgentRow> {
-    let now_unix_ms = super::agent_sidebar::current_unix_ms();
     let mut rendered_rows = endpoints
         .iter()
         .filter_map(|endpoint| {
@@ -126,7 +112,6 @@ fn agent_rows(
                             &agent.pane_id,
                             config,
                             Some(&endpoint.label),
-                            now_unix_ms,
                         )
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))

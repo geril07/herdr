@@ -108,7 +108,6 @@ pub struct SidebarTokenStyle {
 pub enum AgentSidebarToken {
     StateIcon,
     StateText,
-    StateElapsed,
     Machine,
     Workspace,
     Tab,
@@ -273,7 +272,6 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
     match token {
         AgentSidebarToken::StateIcon => "state_icon".into(),
         AgentSidebarToken::StateText => "state_text".into(),
-        AgentSidebarToken::StateElapsed => "state_elapsed".into(),
         AgentSidebarToken::Machine => "machine".into(),
         AgentSidebarToken::Workspace => "workspace".into(),
         AgentSidebarToken::Tab => "tab".into(),
@@ -333,7 +331,6 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
             &[
                 ("state_icon", Self::StateIcon),
                 ("state_text", Self::StateText),
-                ("state_elapsed", Self::StateElapsed),
                 ("machine", Self::Machine),
                 ("workspace", Self::Workspace),
                 ("tab", Self::Tab),
@@ -450,7 +447,7 @@ impl Default for AgentsSidebarConfig {
                     AgentSidebarToken::Workspace,
                     AgentSidebarToken::Tab,
                 ],
-                vec![AgentSidebarToken::Agent, AgentSidebarToken::StateElapsed],
+                vec![AgentSidebarToken::Agent],
             ],
             rows_by_agent: BTreeMap::new(),
             row_gap: DEFAULT_SIDEBAR_ROW_GAP,
@@ -501,7 +498,7 @@ mod tests {
                     AgentSidebarToken::Workspace,
                     AgentSidebarToken::Tab,
                 ],
-                vec![AgentSidebarToken::Agent, AgentSidebarToken::StateElapsed],
+                vec![AgentSidebarToken::Agent],
             ]
         );
         assert!(config.agents.rows_by_agent.is_empty());
@@ -521,7 +518,7 @@ mod tests {
         let config: crate::config::Config = toml::from_str(
             r#"
 [ui.sidebar.agents]
-rows = [["state_icon", "workspace"], ["state_text", "state_elapsed", "agent", "$summary"], ["terminal_title", "terminal_title_stripped", "$terminal_title"]]
+rows = [["state_icon", "workspace"], ["state_text", "agent", "$summary"], ["terminal_title", "terminal_title_stripped", "$terminal_title"]]
 row_gap = 1
 
 [ui.sidebar.agents.rows_by_agent]
@@ -538,7 +535,6 @@ row_gap = 3
             config.ui.sidebar.agents.rows[1],
             vec![
                 AgentSidebarToken::StateText,
-                AgentSidebarToken::StateElapsed,
                 AgentSidebarToken::Agent,
                 AgentSidebarToken::Custom("summary".into()),
             ]

@@ -1,6 +1,6 @@
 //! Self-update mechanism.
 //!
-//! Checks the fork-hosted update manifest for newer versions.
+//! Checks the hosted herdr.dev update manifest for newer versions.
 //! Manual `herdr update` downloads and installs the binary.
 //! Background checks only surface availability and release notes.
 //! Uses `curl` as a subprocess for HTTP — no additional Rust HTTP dependencies.
@@ -22,20 +22,13 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::Stream as _;
 use serde::{Deserialize, Deserializer};
 
-/// Stable releases for this fork (`geril07/herdr`, `custom-v*` tags).
-const STABLE_UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-latest.json";
-/// Fork preview manifest. The fork ships no preview builds; this manifest is
-/// valid for the existing preview parser but contains no assets.
-const PREVIEW_UPDATE_MANIFEST_URL: &str =
-    "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-preview.json";
+const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
+const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";
 const HOMEBREW_UPDATE_COMMAND: &str = "brew update && brew upgrade herdr";
 const MISE_UPDATE_COMMAND: &str = "mise upgrade herdr";
 const NIX_UPDATE_COMMAND: &str = "update through Nix";
-const PACMAN_AUR_UPDATE_COMMAND: &str =
-    "update through your AUR helper (yay/paru) for herdr-geril-bin";
 const MISE_INSTALLS_DIR_ENV: &str = "MISE_INSTALLS_DIR";
 const FAKE_UPDATE_VERSION_ENV: &str = "HERDR_FAKE_UPDATE_VERSION";
 const FAKE_UPDATE_NOTES_VERSION_ENV: &str = "HERDR_FAKE_UPDATE_NOTES_VERSION";
@@ -1892,22 +1885,12 @@ fn print_running_session_update_outcomes(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn update_install_command() -> &'static str {
-    let Ok(current_exe) = env::current_exe() else {
-        return HERDR_UPDATE_COMMAND;
-    };
-
-    update_install_command_for_exe_path(&current_exe)
-}
-
-fn update_install_command_for_exe_path(path: &Path) -> &'static str {
-    if is_homebrew_managed_exe_path_following_links(path) {
+    if is_homebrew_managed_install() {
         HOMEBREW_UPDATE_COMMAND
-    } else if is_mise_managed_exe_path_following_links(path) {
+    } else if is_mise_managed_install() {
         MISE_UPDATE_COMMAND
-    } else if is_nix_store_exe_path_following_links(path) {
+    } else if is_nix_managed_install() {
         NIX_UPDATE_COMMAND
-    } else if is_pacman_managed_exe_path_following_links(path) {
-        PACMAN_AUR_UPDATE_COMMAND
     } else {
         HERDR_UPDATE_COMMAND
     }
@@ -1927,10 +1910,6 @@ pub(crate) fn update_install_instruction(install_command: &str) -> String {
         }
         NIX_UPDATE_COMMAND => {
             "detach, update through Nix, then run Herdr again to reconnect".to_string()
-        }
-        PACMAN_AUR_UPDATE_COMMAND => {
-            "detach, update through your AUR helper (yay/paru) for herdr-geril-bin, then run Herdr again to reconnect"
-                .to_string()
         }
         command => format!("detach, run `{command}`, then run Herdr again to reconnect"),
     }
@@ -1976,8 +1955,6 @@ pub(crate) fn package_manager_channel_update_guidance_for_current_install() -> O
         Some("Use `mise upgrade herdr` to update mise installs.")
     } else if is_nix_managed_install() {
         Some("Update through Nix to update Nix-managed Herdr installs.")
-    } else if is_pacman_managed_install() {
-        Some("Update through your AUR helper (yay/paru) for herdr-geril-bin.")
     } else {
         None
     }
@@ -1994,8 +1971,6 @@ fn preview_channel_rejection_for_exe_path(path: &Path) -> Option<&'static str> {
         )
     } else if is_nix_store_exe_path_following_links(path) {
         Some("preview channel is only available for direct Herdr installs; Nix installs update through Nix")
-    } else if is_pacman_managed_exe_path_following_links(path) {
-        Some("preview channel is only available for direct Herdr installs; AUR installs update through your AUR helper (yay/paru) for herdr-geril-bin")
     } else {
         None
     }
@@ -2006,7 +1981,6 @@ pub(crate) fn is_package_manager_managed_exe_path(path: &Path) -> bool {
     is_homebrew_managed_exe_path_following_links(path)
         || is_mise_managed_exe_path_following_links(path)
         || is_nix_store_exe_path_following_links(path)
-        || is_pacman_managed_exe_path_following_links(path)
 }
 
 #[cfg(not(unix))]
@@ -2039,28 +2013,6 @@ fn is_mise_managed_exe_path_following_links(path: &Path) -> bool {
 
     path.canonicalize()
         .is_ok_and(|path| is_mise_managed_exe_path(&path))
-}
-
-fn is_pacman_managed_install() -> bool {
-    let Ok(current_exe) = env::current_exe() else {
-        return false;
-    };
-
-    is_pacman_managed_exe_path_following_links(&current_exe)
-}
-
-fn is_pacman_managed_exe_path_following_links(path: &Path) -> bool {
-    if is_pacman_managed_exe_path(path) {
-        return true;
-    }
-
-    path.canonicalize()
-        .is_ok_and(|path| is_pacman_managed_exe_path(&path))
-}
-
-fn is_pacman_managed_exe_path(path: &Path) -> bool {
-    // The AUR package installs the fork at this fixed path; a direct install there is indistinguishable.
-    path == Path::new("/usr/bin/herdr")
 }
 
 fn is_nix_store_exe_path(path: &Path) -> bool {
@@ -2191,17 +2143,6 @@ pub fn self_update(options: SelfUpdateOptions) -> Result<Version, String> {
         return Err(
             "self-update is disabled for Nix installs; update with `nix profile upgrade` or update the flake input that provides Herdr".into(),
         );
-    }
-
-    if is_pacman_managed_install() {
-        if channel == UpdateChannel::Preview {
-            return Err(
-                "self-update is disabled for AUR installs; preview is only available for direct Herdr installs".into(),
-            );
-        }
-        return Err(format!(
-            "self-update is disabled for AUR installs; {PACMAN_AUR_UPDATE_COMMAND}"
-        ));
     }
 
     if running_inside_herdr() {
@@ -2337,11 +2278,6 @@ pub fn auto_update(events: tokio::sync::mpsc::Sender<crate::events::AppEvent>) {
 
     if is_mise_managed_install() && configured_channel == UpdateChannel::Preview {
         crate::logging::update_check_failed("preview channel is not available for mise installs");
-        return;
-    }
-
-    if is_pacman_managed_install() && configured_channel == UpdateChannel::Preview {
-        crate::logging::update_check_failed("preview channel is not available for AUR installs");
         return;
     }
 
@@ -2678,29 +2614,6 @@ mod tests {
     }
 
     #[test]
-    fn pacman_aur_install_path_is_detected() {
-        let path = Path::new("/usr/bin/herdr");
-
-        assert!(is_pacman_managed_exe_path(path));
-        assert!(is_package_manager_managed_exe_path(path));
-        assert_eq!(
-            update_install_command_for_exe_path(path),
-            PACMAN_AUR_UPDATE_COMMAND
-        );
-    }
-
-    #[test]
-    fn non_pacman_path_is_not_detected() {
-        let path = Path::new("/home/user/.local/bin/herdr");
-
-        assert!(!is_pacman_managed_exe_path(path));
-        assert_ne!(
-            update_install_command_for_exe_path(path),
-            PACMAN_AUR_UPDATE_COMMAND
-        );
-    }
-
-    #[test]
     fn package_manager_path_detection_follows_homebrew_symlink() {
         #[cfg(unix)]
         {
@@ -2757,7 +2670,6 @@ mod tests {
         let homebrew = Path::new("/opt/homebrew/Cellar/herdr/0.6.6/bin/herdr");
         let mise = Path::new("/home/user/.local/share/mise/installs/herdr/0.6.6/bin/herdr");
         let nix = Path::new("/nix/store/abc123-herdr-0.6.6/bin/herdr");
-        let pacman = Path::new("/usr/bin/herdr");
         let direct = Path::new("/home/user/.local/bin/herdr");
 
         assert!(preview_channel_rejection_for_exe_path(homebrew)
@@ -2766,8 +2678,6 @@ mod tests {
             .is_some_and(|message| message.contains("mise")));
         assert!(preview_channel_rejection_for_exe_path(nix)
             .is_some_and(|message| message.contains("Nix")));
-        assert!(preview_channel_rejection_for_exe_path(pacman)
-            .is_some_and(|message| message.contains("AUR") && message.contains("herdr-geril-bin")));
         assert!(preview_channel_rejection_for_exe_path(direct).is_none());
     }
 
@@ -2854,10 +2764,6 @@ mod tests {
         assert_eq!(
             update_install_instruction(MISE_UPDATE_COMMAND),
             "detach, run `mise upgrade herdr`, then run Herdr again to reconnect"
-        );
-        assert_eq!(
-            update_install_instruction(PACMAN_AUR_UPDATE_COMMAND),
-            "detach, update through your AUR helper (yay/paru) for herdr-geril-bin, then run Herdr again to reconnect"
         );
     }
 
@@ -3907,73 +3813,5 @@ mod tests {
                     .is_some_and(|value| value.len() == 64));
             }
         }
-    }
-
-    #[test]
-    fn fork_update_manifests_never_point_at_upstream() {
-        assert_eq!(
-            STABLE_UPDATE_MANIFEST_URL,
-            "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-latest.json"
-        );
-        assert_eq!(
-            PREVIEW_UPDATE_MANIFEST_URL,
-            "https://raw.githubusercontent.com/geril07/herdr/master/distribution/fork-preview.json"
-        );
-        for url in [STABLE_UPDATE_MANIFEST_URL, PREVIEW_UPDATE_MANIFEST_URL] {
-            assert!(
-                url.contains("geril07/herdr"),
-                "fork manifest must stay fork-hosted: {url}"
-            );
-            assert!(
-                !url.contains("herdr.dev"),
-                "fork manifest must not contact upstream: {url}"
-            );
-        }
-    }
-
-    #[test]
-    fn fork_seed_manifest_is_up_to_date_noop() {
-        let json = include_str!("../distribution/fork-latest.json");
-        let manifest: UpdateManifest = serde_json::from_str(json)
-            .expect("distribution/fork-latest.json should match updater schema");
-
-        // The seed tracks the checked-in Cargo.toml version with the current
-        // protocol values, so installs report up to date without an asset
-        // lookup until the first fork release regenerates this file.
-        assert_eq!(
-            Version::parse(&manifest.version),
-            Some(Version::current()),
-            "fork seed version must equal Cargo.toml version"
-        );
-        assert_eq!(manifest.protocol, Some(crate::protocol::PROTOCOL_VERSION));
-        assert_eq!(
-            manifest.endpoint_generation,
-            Some(crate::protocol::endpoint::ENDPOINT_PROTOCOL_GENERATION)
-        );
-        assert!(!manifest
-            .metadata_for_version(&Version::current())
-            .expect("metadata")
-            .notes_body()
-            .is_empty());
-        assert_eq!(
-            release_info_from_manifest(&manifest)
-                .expect("valid seed manifest")
-                .map(|release| release.identity),
-            None,
-            "fork seed manifest must not offer an update"
-        );
-    }
-
-    #[test]
-    fn fork_preview_manifest_fails_closed_without_builds() {
-        let json = include_str!("../distribution/fork-preview.json");
-        let manifest: PreviewManifest = serde_json::from_str(json)
-            .expect("distribution/fork-preview.json should match preview schema");
-        let error = release_info_from_preview_manifest(&manifest)
-            .expect_err("fork preview channel must not offer a binary");
-        assert!(
-            error.contains("no binary") && error.contains("preview manifest"),
-            "preview users need a clear stable-only failure: {error}"
-        );
     }
 }

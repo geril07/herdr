@@ -47,21 +47,8 @@ fn sidebar_section_heights(total_height: u16, split_ratio: f32) -> (u16, u16) {
     )
 }
 
-pub(crate) fn expanded_sidebar_sections(
-    area: Rect,
-    split_ratio: f32,
-    on_right: bool,
-) -> (Rect, Rect) {
-    let content = if on_right {
-        Rect::new(
-            area.x.saturating_add(1),
-            area.y,
-            area.width.saturating_sub(1),
-            area.height,
-        )
-    } else {
-        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
-    };
+pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, Rect) {
+    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.is_empty() {
         return (Rect::default(), Rect::default());
     }
@@ -78,17 +65,8 @@ pub(crate) fn expanded_sidebar_sections(
     )
 }
 
-pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32, on_right: bool) -> Rect {
-    let content = if on_right {
-        Rect::new(
-            area.x.saturating_add(1),
-            area.y,
-            area.width.saturating_sub(1),
-            area.height,
-        )
-    } else {
-        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
-    };
+pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
+    let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.width == 0 || content.height < 6 {
         return Rect::default();
     }
@@ -151,7 +129,6 @@ pub(crate) fn resolved_token_spans(
         .iter()
         .map(|token| match &token.kind {
             ResolvedTokenKind::StateText(text)
-            | ResolvedTokenKind::StateElapsed(text)
             | ResolvedTokenKind::Machine(text)
             | ResolvedTokenKind::Workspace(text)
             | ResolvedTokenKind::Tab(text)
@@ -253,10 +230,6 @@ pub(crate) fn resolved_token_spans(
             ResolvedTokenKind::StateText(text) => spans.push(Span::styled(
                 truncate_end(text, budgets[index]),
                 apply_token_style(state_text_style, token.style),
-            )),
-            ResolvedTokenKind::StateElapsed(text) => spans.push(Span::styled(
-                truncate_end(text, budgets[index]),
-                apply_token_style(secondary_style, token.style),
             )),
             ResolvedTokenKind::Workspace(text) => spans.push(Span::styled(
                 truncate_end(text, budgets[index]),

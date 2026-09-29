@@ -41,9 +41,6 @@ const MIN_CLIENT_ROWS: u16 = 1;
 /// and cleanup overhead.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(4);
 
-#[cfg(unix)]
-const OBSERVER_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
-
 /// Maximum input payload size (bytes) for a single `ClientMessage::Input`.
 const MAX_INPUT_PAYLOAD: usize = 1024 * 1024; // 1 MB
 const MAX_CLIENT_SHELL_DIMENSION: u16 = 4096;
@@ -398,7 +395,6 @@ pub(crate) enum ServerEvent {
         endpoint_keybindings: bool,
         mouse_capture: bool,
         surface_active: bool,
-        surface_reuse: bool,
         writer: ClientWriter,
     },
     /// A client sent an input message.
@@ -478,17 +474,6 @@ pub(crate) enum ServerEvent {
         cell_width_px: u32,
         cell_height_px: u32,
         pixel_mouse: bool,
-    },
-    /// A client-owned shell reported its full outer terminal size in cells.
-    ///
-    /// Newer clients send this via `shell.terminal_size.v1` alongside the
-    /// pane-surface resize. Popup percentages and centering resolve against
-    /// this full area; older clients that never send it fall back to the
-    /// surface size.
-    ClientShellTerminalResize {
-        client_id: u64,
-        cols: u16,
-        rows: u16,
     },
     /// A client-owned shell delivered semantic input to one stable pane target.
     ClientShellPaneInput {
@@ -775,8 +760,6 @@ pub(crate) fn handle_client_handshake(
                     hello.endpoint_keybindings,
                     hello.mouse_capture,
                     hello.surface_active,
-                    hello.terminal_size,
-                    hello.surface_reuse,
                 )),
             )
         }
@@ -865,46 +848,37 @@ pub(crate) fn handle_client_handshake(
 
     // Notify the main loop about the new client.
     let endpoint_control_writer = shell_options.as_ref().map(|_| writer.control.clone());
-    let (connected, initial_terminal_size) = if let Some((
+    let connected = if let Some((
         pixel_mouse,
         direct_graphics,
         endpoint_keybindings,
         mouse_capture,
         surface_active,
-        terminal_size,
-        surface_reuse,
     )) = shell_options
     {
-        (
-            ServerEvent::ClientShellConnected {
-                client_id,
-                surface_cols: client_cols,
-                surface_rows: client_rows,
-                cell_width_px,
-                cell_height_px,
-                pixel_mouse,
-                direct_graphics,
-                endpoint_keybindings,
-                mouse_capture,
-                surface_active,
-                surface_reuse,
-                writer,
-            },
-            terminal_size,
-        )
+        ServerEvent::ClientShellConnected {
+            client_id,
+            surface_cols: client_cols,
+            surface_rows: client_rows,
+            cell_width_px,
+            cell_height_px,
+            pixel_mouse,
+            direct_graphics,
+            endpoint_keybindings,
+            mouse_capture,
+            surface_active,
+            writer,
+        }
     } else {
-        (
-            ServerEvent::ClientConnected {
-                client_id,
-                cols: client_cols,
-                rows: client_rows,
-                cell_width_px,
-                cell_height_px,
-                pixel_mouse: terminal_pixel_mouse,
-                writer,
-            },
-            None,
-        )
+        ServerEvent::ClientConnected {
+            client_id,
+            cols: client_cols,
+            rows: client_rows,
+            cell_width_px,
+            cell_height_px,
+            pixel_mouse: terminal_pixel_mouse,
+            writer,
+        }
     };
     if let Err(err) = server_event_tx.blocking_send(connected) {
         match err.0 {
@@ -913,21 +887,6 @@ pub(crate) fn handle_client_handshake(
                 send_shutdown_to_unregistered_client(&writer);
             }
             _ => {}
-        }
-        return Ok(());
-    }
-    // Newer clients report the full outer terminal size for popup geometry
-    // alongside the pane-surface hello. Forward it as a separate event so the
-    // main loop stores it before any popup renders. Older hellos omit it and
-    // keep the surface-size fallback. Invalid sizes are ignored here; the
-    // main loop also guards against empty sizes.
-    if let Some(size) = initial_terminal_size {
-        if size.cols != 0 && size.rows != 0 {
-            let _ = server_event_tx.blocking_send(ServerEvent::ClientShellTerminalResize {
-                client_id,
-                cols: size.cols,
-                rows: size.rows,
-            });
         }
     }
 
@@ -981,11 +940,7 @@ fn client_writer_loop(
 }
 
 fn write_framed_bytes(stream: &mut LocalStream, data: &[u8]) -> bool {
-    #[cfg(unix)]
-    let result = crate::platform::write_client_stream(stream, data);
-    #[cfg(windows)]
-    let result = stream.write_all(data);
-    if let Err(err) = result {
+    if let Err(err) = stream.write_all(data) {
         debug!(err = %err, "client write failed, closing writer");
         return false;
     }
@@ -1015,14 +970,8 @@ fn client_read_loop_with_endpoint_controls(
     endpoint_control_writer: Option<&ClientControlWriter>,
 ) -> io::Result<()> {
     while !should_quit.load(Ordering::Acquire) {
-        #[cfg(unix)]
-        let message = protocol::read_message(
-            &mut crate::platform::ClientStreamReader(&mut stream),
-            MAX_GRAPHICS_FRAME_SIZE,
-        );
-        #[cfg(windows)]
-        let message = protocol::read_message(&mut stream, MAX_GRAPHICS_FRAME_SIZE);
-        let msg: ClientMessage = match message {
+        let msg: ClientMessage = match protocol::read_message(&mut stream, MAX_GRAPHICS_FRAME_SIZE)
+        {
             Ok(msg) => msg,
             Err(protocol::FramingError::UnexpectedEof) => {
                 // Client disconnected.
@@ -1078,20 +1027,6 @@ fn client_read_loop_with_endpoint_controls(
                 }
             }
             ClientMessage::ObserveTerminal { target } => {
-                #[cfg(unix)]
-                {
-                    // macOS Unix sockets can block even with per-send MSG_DONTWAIT.
-                    // ClientStreamReader preserves blocking reads on the shared socket.
-                    let configured = stream
-                        .set_send_timeout(Some(OBSERVER_WRITE_TIMEOUT))
-                        .and_then(|()| stream.set_nonblocking(true));
-                    if let Err(err) = configured {
-                        let _ = crate::platform::shutdown_client_stream(&stream);
-                        let _ = server_event_tx
-                            .blocking_send(ServerEvent::ClientDisconnected { client_id });
-                        return Err(err);
-                    }
-                }
                 ServerEvent::ClientObserveTerminal { client_id, target }
             }
             ClientMessage::ControlTerminal { target, takeover } => {
@@ -1354,28 +1289,6 @@ fn client_read_loop_with_endpoint_controls(
                     token: data,
                 }
             }
-            ClientMessage::EndpointControl { kind, data }
-                if kind == crate::protocol::endpoint::TERMINAL_SIZE_KIND =>
-            {
-                let size: crate::protocol::ClientSurfaceSize = match serde_json::from_str(&data) {
-                    Ok(size) => size,
-                    Err(error) => {
-                        debug!(client_id, %error, "ignoring invalid terminal size control");
-                        continue;
-                    }
-                };
-                // Zero sizes are invalid; ignore them and keep the last known
-                // full size (or the surface-size fallback for older clients).
-                if size.cols == 0 || size.rows == 0 {
-                    debug!(client_id, "ignoring empty terminal size control");
-                    continue;
-                }
-                ServerEvent::ClientShellTerminalResize {
-                    client_id,
-                    cols: size.cols,
-                    rows: size.rows,
-                }
-            }
             ClientMessage::EndpointControl { kind, data } => {
                 let Some(response) = crate::server::client_endpoint_control::response(&kind, data)
                 else {
@@ -1499,13 +1412,11 @@ mod tests {
                 cols: surface_cols,
                 rows: surface_rows,
             },
-            terminal_size: None,
             pixel_mouse: true,
             direct_graphics: true,
             endpoint_keybindings: true,
             mouse_capture: true,
             surface_active: true,
-            surface_reuse: false,
             snapshot_codecs: vec![crate::protocol::endpoint::SNAPSHOT_CODEC_V1.into()],
             surface_codecs: vec![crate::protocol::endpoint::SURFACE_CODEC_V1.into()],
             input_codecs: vec![crate::protocol::endpoint::INPUT_CODEC_V1.into()],
@@ -1730,109 +1641,6 @@ mod tests {
         ));
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn observer_write_timeout_resets_when_sending_makes_progress() {
-        use std::io::Read as _;
-
-        let (mut client, mut server, _path) = local_stream_pair("slow-observer");
-        server
-            .set_send_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        server.set_nonblocking(true).unwrap();
-        let worker = std::thread::spawn(move || {
-            assert!(write_framed_bytes(&mut server, &vec![b'x'; 1024 * 1024]));
-        });
-        client
-            .set_recv_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let mut received = 0;
-        let mut buffer = [0; 16 * 1024];
-        while received < 1024 * 1024 {
-            let count = client.read(&mut buffer).unwrap();
-            assert_ne!(count, 0, "observer disconnected while making progress");
-            received += count;
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        worker.join().unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn stalled_observer_timeout_releases_writer_and_reader() {
-        let (mut client, server, _path) = local_stream_pair("stalled-observer");
-        let writer_stream = server.try_clone().expect("clone writer stream");
-        let (writer, queue) = test_queue_writer();
-        let (events, event_rx) = mpsc::channel(8);
-        let reader_events = events.clone();
-        let (reader_done_tx, reader_done) = std::sync::mpsc::channel();
-        let reader = std::thread::spawn(move || {
-            let result = client_read_loop(
-                server,
-                14,
-                &reader_events,
-                &Arc::new(AtomicBool::new(false)),
-            );
-            let _ = reader_done_tx.send(result);
-        });
-        protocol::write_message(
-            &mut client,
-            &ClientMessage::ObserveTerminal {
-                target: "w1:p1".into(),
-            },
-        )
-        .expect("observe request");
-        let mut event_rx = event_rx;
-        assert!(matches!(
-            event_rx.blocking_recv(),
-            Some(ServerEvent::ClientObserveTerminal { client_id: 14, .. })
-        ));
-        let LocalStream::UdSocket(socket) = &writer_stream;
-        assert_eq!(
-            socket.inner().write_timeout().unwrap(),
-            Some(Duration::from_secs(30))
-        );
-        assert_eq!(socket.inner().read_timeout().unwrap(), None);
-        let mut resize = Vec::new();
-        protocol::write_message(
-            &mut resize,
-            &ClientMessage::Resize {
-                cols: 80,
-                rows: 24,
-                cell_width_px: 0,
-                cell_height_px: 0,
-                pixel_mouse: false,
-            },
-        )
-        .unwrap();
-        client.write_all(&resize[..2]).unwrap();
-        std::thread::sleep(Duration::from_millis(20));
-        client.write_all(&resize[2..]).unwrap();
-        assert!(matches!(
-            event_rx.blocking_recv(),
-            Some(ServerEvent::ClientResize { client_id: 14, .. })
-        ));
-        writer_stream
-            .set_send_timeout(Some(Duration::from_millis(200)))
-            .unwrap();
-        let (writer_done_tx, writer_done) = std::sync::mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            client_writer_loop(writer_stream, 14, queue, events);
-            let _ = writer_done_tx.send(());
-        });
-        writer.render.try_send(vec![0; 4 * 1024 * 1024]).unwrap();
-        writer_done
-            .recv_timeout(Duration::from_millis(350))
-            .expect("writer timed out");
-        reader_done
-            .recv_timeout(Duration::from_secs(2))
-            .expect("reader released")
-            .unwrap();
-        worker.join().unwrap();
-        reader.join().unwrap();
-        assert!(writer.control.send(vec![1]).is_err());
-    }
-
     #[test]
     fn clamp_terminal_size_zero_zero() {
         assert_eq!(
@@ -2021,10 +1829,8 @@ mod tests {
                 endpoint_keybindings,
                 mouse_capture,
                 surface_active,
-                surface_reuse,
                 writer,
             } => {
-                assert!(!surface_reuse);
                 assert_eq!(client_id, 43);
                 assert_eq!((surface_cols, surface_rows), (80, 29));
                 assert_eq!((cell_width_px, cell_height_px), (8, 16));
@@ -2132,57 +1938,6 @@ mod tests {
 
         assert!(matches!(
             recv_server_event(&mut server_event_rx, "detach after future control"),
-            ServerEvent::ClientDetach { client_id: 7 }
-        ));
-        handle
-            .join()
-            .expect("read thread join")
-            .expect("read thread result");
-    }
-
-    #[test]
-    fn client_read_loop_forwards_full_terminal_size_for_popup_geometry() {
-        let (mut client_stream, server_stream, _path) =
-            local_stream_pair("client-read-terminal-size");
-        let (server_event_tx, mut server_event_rx) = mpsc::channel(4);
-        let should_quit = Arc::new(AtomicBool::new(false));
-        let read_quit = should_quit.clone();
-        let handle = std::thread::spawn(move || {
-            client_read_loop(server_stream, 7, &server_event_tx, &read_quit)
-        });
-
-        protocol::write_message(
-            &mut client_stream,
-            &crate::protocol::endpoint::terminal_size_control(106, 20),
-        )
-        .unwrap();
-        assert!(matches!(
-            recv_server_event(&mut server_event_rx, "terminal resize"),
-            ServerEvent::ClientShellTerminalResize {
-                client_id: 7,
-                cols: 106,
-                rows: 20,
-            }
-        ));
-
-        // Invalid payloads and empty sizes are ignored without disconnecting.
-        for data in [
-            "not-json",
-            r#"{"cols":0,"rows":20}"#,
-            r#"{"cols":106,"rows":0}"#,
-        ] {
-            protocol::write_message(
-                &mut client_stream,
-                &ClientMessage::EndpointControl {
-                    kind: crate::protocol::endpoint::TERMINAL_SIZE_KIND.into(),
-                    data: data.into(),
-                },
-            )
-            .unwrap();
-        }
-        protocol::write_message(&mut client_stream, &ClientMessage::Detach).unwrap();
-        assert!(matches!(
-            recv_server_event(&mut server_event_rx, "detach after invalid terminal sizes"),
             ServerEvent::ClientDetach { client_id: 7 }
         ));
         handle

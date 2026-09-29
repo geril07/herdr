@@ -75,16 +75,9 @@ pub(crate) struct ClientShellConfig {
     pub(super) sidebar_max_width: u16,
     pub(super) sidebar_start_collapsed: bool,
     pub(super) sidebar_collapsed_mode: SidebarCollapsedModeConfig,
-    pub(super) sidebar_position: SidebarPositionConfig,
     pub(super) mobile_width_threshold: u16,
     pub(super) tab_bar_position: TabBarPositionConfig,
-    pub(super) tab_bar_numbers: bool,
     pub(super) hide_tab_bar_when_single_tab: bool,
-    pub(super) tab_status: bool,
-    pub(super) tab_status_idle: bool,
-    pub(super) tab_status_max: usize,
-    pub(super) tab_status_spacing: bool,
-    pub(super) tab_status_order: crate::config::TabStatusOrderConfig,
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
@@ -104,11 +97,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) keybinding_source: ClientShellKeybindingSource,
     pub(super) prompt_new_tab_name: bool,
     pub(super) prompt_new_workspace_name: bool,
-    pub(super) navigator_start_expanded: bool,
-    pub(super) navigator_start_search_focused: bool,
     pub(super) confirm_close: bool,
-    pub(super) confirm_pane_close: bool,
-    pub(super) confirm_tab_close: bool,
     pub(super) mouse_capture: bool,
     pub(super) mouse_scroll_lines: usize,
     pub(super) right_click_passthrough_modifiers: Option<crossterm::event::KeyModifiers>,
@@ -181,7 +170,6 @@ pub(super) struct ShellHitMap {
     pub(super) mobile_max_scroll: usize,
     pub(super) global_launcher: Rect,
     pub(super) notification_toast: Rect,
-    pub(super) config_diagnostic_dismiss: Rect,
     pub(super) global_menu_rows: Vec<(Rect, usize)>,
     pub(super) context_menu_rows: Vec<(Rect, usize)>,
     pub(super) overlay_primary: Rect,
@@ -190,9 +178,6 @@ pub(super) struct ShellHitMap {
     pub(super) navigator_popup: Rect,
     pub(super) navigator_search: Rect,
     pub(super) navigator_rows: Vec<(Rect, ClientNavigatorTarget)>,
-    pub(super) agent_picker_popup: Rect,
-    pub(super) agent_picker_search: Rect,
-    pub(super) agent_picker_rows: Vec<(Rect, ClientEndpointId, String)>,
     pub(super) worktree_search: Rect,
     pub(super) worktree_rows: Vec<(Rect, usize)>,
     pub(super) help_popup: Rect,
@@ -352,7 +337,6 @@ pub(super) enum ClientShellOverlayKind {
     ConfirmClose,
     Help,
     Navigator,
-    AgentPicker,
     WorktreeCreate,
     WorktreeOpen,
     WorktreeRemove,
@@ -430,7 +414,7 @@ pub(super) struct ClientNavigatorRow {
     pub(super) target: ClientNavigatorTarget,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct ClientNavigatorOverlay {
     pub(super) query: TextEditor,
     pub(super) search_focused: bool,
@@ -438,15 +422,6 @@ pub(super) struct ClientNavigatorOverlay {
     pub(super) scroll: usize,
     pub(super) filter: Option<ClientNavigatorFilter>,
     pub(super) expanded_workspaces: HashSet<(ClientEndpointId, String)>,
-}
-
-#[derive(Debug)]
-pub(super) struct ClientAgentPickerOverlay {
-    pub(super) query: String,
-    pub(super) search_focused: bool,
-    pub(super) selected: Option<(ClientEndpointId, String)>,
-    pub(super) scroll: usize,
-    pub(super) filter: Option<ClientNavigatorFilter>,
 }
 
 #[derive(Debug)]
@@ -643,27 +618,10 @@ pub(super) struct ClientContextMenuItem {
 }
 
 #[derive(Debug)]
-pub(super) enum ClientConfirmCloseTarget {
-    Workspace {
-        endpoint_id: ClientEndpointId,
-        workspace_id: String,
-    },
-    Pane {
-        endpoint_id: ClientEndpointId,
-        pane_id: String,
-    },
-    Tab {
-        endpoint_id: ClientEndpointId,
-        tab_id: String,
-    },
-}
-
-#[derive(Debug)]
 pub(super) struct ClientConfirmCloseOverlay {
-    pub(super) target: ClientConfirmCloseTarget,
+    pub(super) workspace_id: String,
     pub(super) title: String,
     pub(super) detail: String,
-    pub(super) return_to_navigator: Option<ClientNavigatorOverlay>,
 }
 
 #[derive(Debug)]
@@ -675,7 +633,6 @@ pub(super) enum ClientShellOverlay {
     ConfirmClose(ClientConfirmCloseOverlay),
     Help(ClientHelpOverlay),
     Navigator(ClientNavigatorOverlay),
-    AgentPicker(ClientAgentPickerOverlay),
     WorktreeCreate(ClientWorktreeCreateOverlay),
     WorktreeOpen(ClientWorktreeOpenOverlay),
     WorktreeRemove(ClientWorktreeRemoveOverlay),
@@ -694,7 +651,6 @@ impl ClientShellOverlay {
             Self::ConfirmClose(_) => ClientShellOverlayKind::ConfirmClose,
             Self::Help(_) => ClientShellOverlayKind::Help,
             Self::Navigator(_) => ClientShellOverlayKind::Navigator,
-            Self::AgentPicker(_) => ClientShellOverlayKind::AgentPicker,
             Self::WorktreeCreate(_) => ClientShellOverlayKind::WorktreeCreate,
             Self::WorktreeOpen(_) => ClientShellOverlayKind::WorktreeOpen,
             Self::WorktreeRemove(_) => ClientShellOverlayKind::WorktreeRemove,
@@ -769,7 +725,6 @@ pub(super) struct PendingEndpointRequest {
     pub(super) boot_id: String,
     pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
-    pub(super) confirmation_endpoint_id: Option<ClientEndpointId>,
     pub(super) kind: PendingEndpointKind,
 }
 
@@ -972,15 +927,12 @@ pub(crate) struct ClientShellState {
     pub(super) last_composed_size: Option<(u16, u16)>,
     pub(super) last_composed_at: Option<std::time::Instant>,
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
-    status_elapsed_refresh_deadline: std::time::Instant,
     pub(super) hits: ShellHitMap,
     pub(super) endpoints: Vec<ClientShellEndpoint>,
     pub(super) active_endpoint_id: ClientEndpointId,
     pub(super) collapsed_endpoints: HashSet<ClientEndpointId>,
     pub(super) mode: ClientShellMode,
     pub(super) navigate_workspace_id: Option<WorkspaceNavigationTarget>,
-    pub(super) navigate_agent: Option<AgentNavigationTarget>,
-    pub(super) navigate_section: SidebarNavSection,
     pub(super) reveal_navigation_workspace: bool,
     pub(super) overlay: Option<ClientShellOverlay>,
     pub(super) previous_pane_id: Option<String>,
@@ -1026,7 +978,6 @@ pub(crate) struct ClientShellState {
     pub(super) host_background: Option<crate::terminal_theme::RgbColor>,
     pub(super) local_config_diagnostic: Option<String>,
     pub(super) config_diagnostic: Option<String>,
-    pub(super) dismissed_config_diagnostic: Option<String>,
     pub(super) endpoint_error: Option<String>,
     pub(super) endpoint_error_deadline: Option<std::time::Instant>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
@@ -1138,15 +1089,12 @@ impl ClientShellState {
             last_composed_size: None,
             last_composed_at: None,
             selection_repaint_deadline: None,
-            status_elapsed_refresh_deadline: std::time::Instant::now(),
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
             active_endpoint_id: ClientEndpointId::Local,
             collapsed_endpoints: HashSet::new(),
             mode: ClientShellMode::Terminal,
             navigate_workspace_id: None,
-            navigate_agent: None,
-            navigate_section: SidebarNavSection::Spaces,
             reveal_navigation_workspace: false,
             overlay,
             previous_pane_id: None,
@@ -1191,7 +1139,6 @@ impl ClientShellState {
             host_appearance_explicit: false,
             host_background: None,
             config_diagnostic: local_config_diagnostic.clone(),
-            dismissed_config_diagnostic: None,
             local_config_diagnostic,
             endpoint_error: None,
             endpoint_error_deadline: None,
@@ -1211,7 +1158,7 @@ impl ClientShellState {
             .is_some()
         {
             self.mode = self.copy_or_terminal_mode();
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
         } else {
             self.mode = ClientShellMode::Navigate;
         }
@@ -1337,7 +1284,7 @@ impl ClientShellState {
         self.visible_endpoint_notice = None;
         self.endpoint_error = None;
         self.endpoint_error_deadline = None;
-        self.clear_navigate_preview();
+        self.navigate_workspace_id = None;
         self.overlay = self
             .config
             .startup_onboarding
@@ -1429,6 +1376,10 @@ impl ClientShellState {
             }
             ClientShellKeybindingSource::RemoteLocal => false,
         };
+        self.config_diagnostic = super::config::merged_config_diagnostic(
+            self.local_config_diagnostic.as_deref(),
+            snapshot.config_diagnostic.as_deref(),
+        );
         let boot_changed = endpoint_boot_changed
             || self
                 .snapshot
@@ -1444,19 +1395,11 @@ impl ClientShellState {
         }
         if boot_changed {
             // A reboot must not turn Enter on a stale preview into focus on a reused ID.
-            let preview = (self.mode == ClientShellMode::Navigate).then(|| {
-                (
-                    self.navigate_workspace_id.take(),
-                    self.navigate_agent.take(),
-                    self.navigate_section,
-                )
-            });
+            let preview = (self.mode == ClientShellMode::Navigate)
+                .then(|| self.navigate_workspace_id.take())
+                .flatten();
             self.reset_endpoint_projection();
-            if let Some((workspace, agent, section)) = preview {
-                self.navigate_workspace_id = workspace;
-                self.navigate_agent = agent;
-                self.navigate_section = section;
-            }
+            self.navigate_workspace_id = preview;
         } else if let Some(previous) = self
             .snapshot
             .as_deref()
@@ -1593,9 +1536,6 @@ impl ClientShellState {
                 .and_then(|id| self.navigation_target(&self.active_endpoint_id, id));
             self.reveal_mobile_workspace = self.mobile_layout_active();
         }
-        if self.mode == ClientShellMode::Navigate && self.navigate_agent.is_none() {
-            self.navigate_agent = self.initial_agent_target();
-        }
         let pane_exists =
             |pane_id: &String| snapshot.panes.iter().any(|pane| &pane.pane_id == pane_id);
         self.pane_scroll_in_flight
@@ -1661,7 +1601,6 @@ impl ClientShellState {
             }
         }
         self.snapshot = Some(snapshot);
-        self.refresh_config_diagnostic();
         let pending_surface = self.pending_pane_surface.take();
         if let Some(surface) = pending_surface {
             let matching = self.snapshot.as_ref().is_some_and(|snapshot| {
@@ -1752,7 +1691,7 @@ impl ClientShellState {
                     .remove_target(&ClientInputTarget::Popup(terminal_id.clone()));
             }
             self.mode = ClientShellMode::Terminal;
-            self.clear_navigate_preview();
+            self.navigate_workspace_id = None;
             if !matches!(
                 self.overlay.as_ref(),
                 Some(ClientShellOverlay::Onboarding | ClientShellOverlay::ProductAnnouncement(_))
@@ -1967,51 +1906,6 @@ impl ClientShellState {
             return true;
         }
         false
-    }
-
-    pub(crate) fn tick_status_elapsed(&mut self) -> bool {
-        let now = std::time::Instant::now();
-        if now < self.status_elapsed_refresh_deadline {
-            return false;
-        }
-        self.status_elapsed_refresh_deadline = now + std::time::Duration::from_secs(60);
-
-        if self.sidebar_collapsed || !self.uses_state_elapsed_token() {
-            return false;
-        }
-        if !self.endpoints.iter().any(|endpoint| {
-            endpoint.snapshot.as_ref().is_some_and(|snapshot| {
-                snapshot.agents.iter().any(|agent| {
-                    agent.tokens.iter().any(|(key, _)| {
-                        key == crate::api::schema::AGENT_STATUS_CHANGED_UNIX_MS_TOKEN
-                    })
-                })
-            })
-        }) {
-            return false;
-        }
-        true
-    }
-
-    fn uses_state_elapsed_token(&self) -> bool {
-        self.config
-            .agents
-            .rows
-            .iter()
-            .flatten()
-            .chain(
-                self.config
-                    .agents
-                    .rows_by_agent
-                    .values()
-                    .flat_map(|rows| rows.iter().flatten()),
-            )
-            .any(|token| {
-                matches!(
-                    token.parts().0,
-                    crate::config::AgentSidebarToken::StateElapsed
-                )
-            })
     }
 
     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {

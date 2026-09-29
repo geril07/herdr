@@ -155,7 +155,7 @@ impl ClientShellState {
                         self.overlay = None;
                         outcome.repaint = true;
                     }
-                    _ if self.confirm_accept_pressed(key) => self.submit_worktree_remove(outcome),
+                    KeyCode::Enter => self.submit_worktree_remove(outcome),
                     _ => {}
                 }
                 true
