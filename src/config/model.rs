@@ -373,6 +373,8 @@ pub struct KeysConfig {
     pub navigate_workspace_up: BindingConfig,
     /// Move workspace selection down in navigate mode. Default: "down".
     pub navigate_workspace_down: BindingConfig,
+    /// Additional key to open the selected workspace in navigate mode. Enter always works.
+    pub navigate_workspace_open: BindingConfig,
     /// Focus the pane to the left in navigate mode. Default: "h". Left arrow is always an alias.
     pub navigate_pane_left: BindingConfig,
     /// Focus the pane below in navigate mode. Default: "j".
@@ -517,6 +519,8 @@ pub(crate) struct KeysConfigOverlay {
     navigate_workspace_up: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_workspace_down: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    navigate_workspace_open: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     navigate_pane_left: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -679,6 +683,7 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(goto);
         apply_field!(navigate_workspace_up);
         apply_field!(navigate_workspace_down);
+        apply_field!(navigate_workspace_open);
         apply_field!(navigate_pane_left);
         apply_field!(navigate_pane_down);
         apply_field!(navigate_pane_up);
@@ -787,6 +792,7 @@ impl KeysConfig {
         copy_effective_action_field!(goto, keybinds.goto);
         copy_effective_action_field!(navigate_workspace_up, keybinds.navigate.workspace_up);
         copy_effective_action_field!(navigate_workspace_down, keybinds.navigate.workspace_down);
+        copy_effective_action_field!(navigate_workspace_open, keybinds.navigate.workspace_open);
         copy_effective_action_field!(navigate_pane_left, keybinds.navigate.pane_left);
         copy_effective_action_field!(navigate_pane_down, keybinds.navigate.pane_down);
         copy_effective_action_field!(navigate_pane_up, keybinds.navigate.pane_up);
@@ -1188,6 +1194,7 @@ impl Default for KeysConfig {
             goto: BindingConfig::one("prefix+g"),
             navigate_workspace_up: BindingConfig::one("up"),
             navigate_workspace_down: BindingConfig::one("down"),
+            navigate_workspace_open: BindingConfig::empty(),
             navigate_pane_left: BindingConfig::one("h"),
             navigate_pane_down: BindingConfig::one("j"),
             navigate_pane_up: BindingConfig::one("k"),
