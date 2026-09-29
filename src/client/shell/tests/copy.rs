@@ -1221,7 +1221,7 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
     };
     navigator.query.clear();
     let frame = state.compose(160, 48).expect("navigator");
-    assert_eq!(state.hits.navigator_popup.width, 116);
+    assert_eq!(state.hits.navigator_popup.width, 84);
     let pane_rows = state
         .hits
         .navigator_rows
