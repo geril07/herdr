@@ -194,13 +194,7 @@ impl ClientShellState {
         let collapsed_workspaces = if self.config.navigator_start_expanded {
             std::collections::HashSet::new()
         } else {
-            super::aggregate_navigation::cached_endpoint_snapshots(&self.endpoints)
-                .flat_map(|endpoint| {
-                    endpoint.snapshot.workspaces.iter().map(move |workspace| {
-                        (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
-                    })
-                })
-                .collect()
+            all_navigator_workspace_keys(&self.endpoints)
         };
         let mut navigator = ClientNavigatorOverlay {
             query: TextEditor::default(),
@@ -418,36 +412,92 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
-    /// Flip the collapse state of the selected workspace row. The workspace row
-    /// stays visible either way, so the selection and scroll are left alone and
-    /// the highlight never jumps to the top of the list.
+    /// The workspace the selected navigator row belongs to, plus whether the row
+    /// is that workspace itself. A workspace row owns its collapse state and so
+    /// flips it; a pane row collapses the parent it is nested under.
+    fn selected_navigator_workspace(&self) -> Option<(ClientEndpointId, String, bool)> {
+        let ClientShellOverlay::Navigator(navigator) = self.overlay.as_ref()? else {
+            return None;
+        };
+        let rows =
+            render::client_navigator_rows(&self.endpoints, &self.active_endpoint_id, navigator);
+        let target = super::aggregate_navigation::selected_navigator_target(&rows, navigator)?;
+        match target {
+            ClientNavigatorTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+            } => Some((endpoint_id, workspace_id, true)),
+            ClientNavigatorTarget::Pane {
+                endpoint_id,
+                pane_id,
+            } => self
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.snapshot.as_deref())
+                .and_then(|snapshot| snapshot.panes.iter().find(|pane| pane.pane_id == pane_id))
+                .map(|pane| (endpoint_id, pane.workspace_id.clone(), false)),
+            ClientNavigatorTarget::Machine { .. } => None,
+        }
+    }
+
+    /// Put the navigator highlight on a workspace row. A collapsed workspace
+    /// hides its panes, so leaving the selection on a child row would drop the
+    /// highlight to the first pane of the list instead of where the user acted.
+    fn select_navigator_workspace(
+        navigator: &mut ClientNavigatorOverlay,
+        endpoint_id: ClientEndpointId,
+        workspace_id: String,
+    ) {
+        navigator.selected = Some(ClientNavigatorTarget::Workspace {
+            endpoint_id,
+            workspace_id,
+        });
+        navigator.scroll = 0;
+    }
+
+    /// Flip the selected workspace row, or collapse the parent of the selected
+    /// pane row. The selection moves to that workspace either way.
     pub(super) fn toggle_selected_navigator_workspace(&mut self) {
-        let Some(workspace) = self.overlay.as_ref().and_then(|overlay| match overlay {
-            ClientShellOverlay::Navigator(navigator) => {
-                let rows = render::client_navigator_rows(
-                    &self.endpoints,
-                    &self.active_endpoint_id,
-                    navigator,
-                );
-                super::aggregate_navigation::selected_navigator_target(&rows, navigator).and_then(
-                    |target| match target {
-                        ClientNavigatorTarget::Workspace {
-                            endpoint_id,
-                            workspace_id,
-                        } => Some((endpoint_id, workspace_id)),
-                        _ => None,
-                    },
-                )
-            }
-            _ => None,
-        }) else {
+        let Some((endpoint_id, workspace_id, is_workspace_row)) =
+            self.selected_navigator_workspace()
+        else {
             return;
         };
         let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() else {
             return;
         };
-        if !navigator.collapsed_workspaces.remove(&workspace) {
+        let workspace = (endpoint_id.clone(), workspace_id.clone());
+        if is_workspace_row {
+            if !navigator.collapsed_workspaces.remove(&workspace) {
+                navigator.collapsed_workspaces.insert(workspace);
+            }
+        } else {
             navigator.collapsed_workspaces.insert(workspace);
+        }
+        Self::select_navigator_workspace(navigator, endpoint_id, workspace_id);
+    }
+
+    /// Collapse every workspace, then keep the highlight on the workspace the
+    /// selected row belonged to so it does not fall through to another one.
+    pub(super) fn collapse_all_navigator_workspaces(&mut self) {
+        if !matches!(self.overlay, Some(ClientShellOverlay::Navigator(_))) {
+            return;
+        }
+        let collapsed = all_navigator_workspace_keys(&self.endpoints);
+        let selected = self.selected_navigator_workspace();
+        let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() else {
+            return;
+        };
+        navigator.collapsed_workspaces = collapsed;
+        if let Some((endpoint_id, workspace_id, _)) = selected {
+            Self::select_navigator_workspace(navigator, endpoint_id, workspace_id);
+        }
+    }
+
+    pub(super) fn expand_all_navigator_workspaces(&mut self) {
+        if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
+            navigator.collapsed_workspaces.clear();
         }
     }
 
@@ -1047,6 +1097,16 @@ impl ClientShellState {
                     navigator.filter = None;
                     navigator.selected = None;
                 }
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('c') && modifiers.is_empty() {
+                self.collapse_all_navigator_workspaces();
+                outcome.repaint = true;
+                return;
+            }
+            if code == KeyCode::Char('e') && modifiers.is_empty() {
+                self.expand_all_navigator_workspaces();
                 outcome.repaint = true;
                 return;
             }
@@ -1694,4 +1754,18 @@ impl ClientShellState {
         ));
         true
     }
+}
+
+/// Every `(endpoint, workspace)` key the navigator can collapse. Workspaces are
+/// expanded unless listed, so this is the fully collapsed state.
+fn all_navigator_workspace_keys(
+    endpoints: &[ClientShellEndpoint],
+) -> std::collections::HashSet<(ClientEndpointId, String)> {
+    super::aggregate_navigation::cached_endpoint_snapshots(endpoints)
+        .flat_map(|endpoint| {
+            endpoint.snapshot.workspaces.iter().map(move |workspace| {
+                (endpoint.endpoint_id.clone(), workspace.workspace_id.clone())
+            })
+        })
+        .collect()
 }
