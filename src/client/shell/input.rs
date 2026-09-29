@@ -696,7 +696,16 @@ impl ClientShellState {
         }
 
         let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
-        if code == KeyCode::Enter && modifiers.is_empty() {
+        let opens_selection = modifiers.is_empty()
+            && (code == KeyCode::Enter
+                || self
+                    .config
+                    .keybinds
+                    .keybinds
+                    .navigate
+                    .workspace_open
+                    .matches_direct_key(key));
+        if opens_selection {
             match self.navigate_section {
                 SidebarNavSection::Spaces => self.accept_navigate_workspace(outcome),
                 SidebarNavSection::Agents => self.accept_navigate_agent(outcome),
@@ -809,6 +818,8 @@ impl ClientShellState {
             return;
         }
 
+        // Navigate mode is a workspace-preview context. Keep built-in prefix actions
+        // available, but do not run arbitrary custom commands against the preview.
         let binding = crate::input::resolve_non_indexed_action(
             &self.config.keybinds.keybinds,
             key,
@@ -824,14 +835,6 @@ impl ClientShellState {
             )
         })
         .map(KeybindMatch::Action)
-        .or_else(|| {
-            crate::input::resolve_custom_command(
-                &self.config.keybinds.keybinds,
-                key,
-                KeybindDispatch::Prefix,
-            )
-            .map(KeybindMatch::Command)
-        })
         .or_else(|| {
             crate::input::resolve_indexed_action(
                 &self.config.keybinds.keybinds,
