@@ -42,8 +42,10 @@ pub(super) fn render_collapsed(
             let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
                 .unwrap_or(&empty_collapsed_groups);
             rows.extend(
-                super::sidebar::workspace_entries(snapshot, collapsed_groups)
-                    .into_iter()
+                endpoint
+                    .workspace_entries(snapshot, collapsed_groups)
+                    .iter()
+                    .copied()
                     .map(|entry| CollapsedRow::Workspace {
                         endpoint: endpoint_index,
                         entry,
@@ -328,8 +330,10 @@ pub(super) fn render_expanded(
             let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
                 .unwrap_or(&empty_collapsed_groups);
             rows.extend(
-                super::sidebar::workspace_entries(snapshot, collapsed_groups)
-                    .into_iter()
+                endpoint
+                    .workspace_entries(snapshot, collapsed_groups)
+                    .iter()
+                    .copied()
                     .map(|entry| Row::Workspace {
                         endpoint: endpoint_index,
                         entry,

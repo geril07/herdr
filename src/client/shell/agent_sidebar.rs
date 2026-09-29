@@ -20,6 +20,7 @@ pub(super) struct AgentRow {
 pub(super) fn ordered_agent_pane_ids(
     snapshot: &ClientShellSnapshot,
     sort: crate::config::AgentPanelSortConfig,
+    expanded_entries: &[WorkspaceEntry],
 ) -> Vec<String> {
     if snapshot.agent_view_label.is_some() {
         return snapshot
@@ -43,10 +44,10 @@ pub(super) fn ordered_agent_pane_ids(
             )
         });
     } else {
-        let order = grouped_workspace_order(snapshot);
+        let order = grouped_workspace_order(snapshot, expanded_entries);
         agents.sort_by_key(|agent| {
             order
-                .get(&agent.workspace_id)
+                .get(agent.workspace_id.as_str())
                 .copied()
                 .unwrap_or(usize::MAX)
         });
@@ -60,16 +61,18 @@ pub(super) fn ordered_agent_pane_ids(
 /// Grouped workspace position (parent, children, standalone) used to keep the
 /// agents panel in the same order as the spaces panel. Uses the fully expanded
 /// grouping so agents of collapsed groups stay ordered instead of hidden.
-fn grouped_workspace_order(snapshot: &ClientShellSnapshot) -> HashMap<String, usize> {
-    let empty = std::collections::HashSet::new();
-    super::render::workspace_entries(snapshot, &empty)
-        .into_iter()
+pub(super) fn grouped_workspace_order<'a>(
+    snapshot: &'a ClientShellSnapshot,
+    expanded_entries: &[WorkspaceEntry],
+) -> HashMap<&'a str, usize> {
+    expanded_entries
+        .iter()
         .enumerate()
         .filter_map(|(position, entry)| {
             snapshot
                 .workspaces
                 .get(entry.index)
-                .map(|workspace| (workspace.workspace_id.clone(), position))
+                .map(|workspace| (workspace.workspace_id.as_str(), position))
         })
         .collect()
 }
@@ -81,6 +84,7 @@ pub(super) fn render_agent_panel(
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
     selected_pane_id: Option<&str>,
+    expanded_entries: &[WorkspaceEntry],
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -93,7 +97,7 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
+    let rows = agent_rows(snapshot, config, None, expanded_entries);
     render_agent_list(
         buffer,
         area,
@@ -265,9 +269,10 @@ pub(super) fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
+    expanded_entries: &[WorkspaceEntry],
 ) -> Vec<AgentRow> {
     let now_unix_ms = current_unix_ms();
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    ordered_agent_pane_ids(snapshot, config.agent_panel_sort, expanded_entries)
         .into_iter()
         .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine, now_unix_ms))
         .collect()

@@ -1014,7 +1014,7 @@ pub(super) fn release_notes_state(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct WorkspaceEntry {
     pub(super) index: usize,
     pub(super) indented: bool,
@@ -1213,18 +1213,59 @@ impl ClientShellState {
         }
     }
 
+    /// The endpoint whose sidebar the current chrome draws, when it has one.
+    /// Machine-level surfaces iterate `endpoints` directly; this covers the
+    /// active endpoint lookups that happen outside the render path.
+    pub(super) fn active_endpoint(&self) -> Option<&ClientShellEndpoint> {
+        self.endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+    }
+
+    /// The fully expanded grouped ordering of the active snapshot, the alignment
+    /// the agent panels and machine lists use.
+    pub(super) fn expanded_navigation_entries(
+        &self,
+        snapshot: &ClientShellSnapshot,
+    ) -> Cow<'_, [WorkspaceEntry]> {
+        self.active_endpoint().map_or_else(
+            || {
+                Cow::Owned(workspace_entries::workspace_entries(
+                    snapshot,
+                    &HashSet::new(),
+                ))
+            },
+            |endpoint| endpoint.expanded_workspace_entries(snapshot),
+        )
+    }
+
     pub(super) fn navigation_workspace_entries(
         &self,
         snapshot: &ClientShellSnapshot,
-    ) -> Vec<WorkspaceEntry> {
+    ) -> Cow<'_, [WorkspaceEntry]> {
         let empty_collapsed_groups = HashSet::new();
         if self.mobile_layout_active() {
-            render::workspace_entries(snapshot, &empty_collapsed_groups)
+            self.active_endpoint().map_or_else(
+                || {
+                    Cow::Owned(workspace_entries::workspace_entries(
+                        snapshot,
+                        &empty_collapsed_groups,
+                    ))
+                },
+                |endpoint| endpoint.workspace_entries(snapshot, &empty_collapsed_groups),
+            )
         } else {
-            render::workspace_entries(
-                snapshot,
-                self.collapsed_groups_for_endpoint(&self.active_endpoint_id)
-                    .unwrap_or(&empty_collapsed_groups),
+            let collapsed_groups = self
+                .collapsed_groups_for_endpoint(&self.active_endpoint_id)
+                .unwrap_or(&empty_collapsed_groups);
+            self.active_endpoint().map_or_else(
+                || {
+                    Cow::Owned(workspace_entries::workspace_entries(
+                        snapshot,
+                        collapsed_groups,
+                    ))
+                },
+                |endpoint| endpoint.workspace_entries(snapshot, collapsed_groups),
             )
         }
     }

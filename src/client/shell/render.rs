@@ -11,7 +11,7 @@ pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel
 pub(super) use super::aggregate_navigation::agent_picker_rows as client_agent_picker_rows;
 pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
 pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
-pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
+pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar};
 pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
 
 pub(in crate::client::shell) fn render_sidebar_background(
@@ -235,6 +235,15 @@ pub(super) fn render_mode_bar(
     Some(bar)
 }
 
+/// The two grouped orderings one endpoint's spaces surfaces draw: the sidebar's
+/// collapsed view, and the fully expanded view the agents panel keeps its rows
+/// aligned to. Both are borrowed from the endpoint memo for the whole frame, so
+/// a caller that mutates render state can still hold them.
+pub(super) struct EndpointWorkspaceOrderings<'a> {
+    pub(super) collapsed: Cow<'a, [WorkspaceEntry]>,
+    pub(super) expanded: Cow<'a, [WorkspaceEntry]>,
+}
+
 pub(super) struct ShellRenderState<'a> {
     pub(super) machine_diagnostics: &'a super::machine_diagnostics::MachineDiagnostics,
     pub(super) endpoints: &'a [ClientShellEndpoint],
@@ -294,28 +303,44 @@ pub(super) fn render_shell(
                     &mut hits,
                 );
             }
-        } else if state.sidebar_collapsed {
-            render_collapsed_sidebar(
-                buffer,
-                layout.sidebar,
-                snapshot,
-                config,
-                state.collapsed_groups,
-                state
-                    .selected_workspace_id
-                    .map(|target| target.workspace_id.as_str()),
-                state.selected_agent.map(|target| target.pane_id.as_str()),
-                &mut hits,
-            );
         } else {
-            render_sidebar(
-                buffer,
-                layout.sidebar,
+            // The single-endpoint sidebar draws the active snapshot, so its
+            // orderings come from the active endpoint memo. Borrowing them from
+            // the endpoint keeps the mutable render state usable while the
+            // sidebar walks both orderings.
+            let orderings = super::workspace_entries::active_workspace_orderings(
+                state.endpoints,
+                state.active_endpoint_id,
+                state.collapsed_groups,
                 snapshot,
-                config,
-                &mut state,
-                &mut hits,
             );
+            if state.sidebar_collapsed {
+                render_collapsed_sidebar(
+                    buffer,
+                    layout.sidebar,
+                    snapshot,
+                    config,
+                    state.collapsed_groups,
+                    &orderings.collapsed,
+                    &orderings.expanded,
+                    state
+                        .selected_workspace_id
+                        .map(|target| target.workspace_id.as_str()),
+                    state.selected_agent.map(|target| target.pane_id.as_str()),
+                    &mut hits,
+                );
+            } else {
+                render_sidebar(
+                    buffer,
+                    layout.sidebar,
+                    snapshot,
+                    config,
+                    &orderings.collapsed,
+                    &orderings.expanded,
+                    &mut state,
+                    &mut hits,
+                );
+            }
         }
     }
     if layout.tab_bar.height > 0 {
