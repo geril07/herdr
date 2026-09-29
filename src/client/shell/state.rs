@@ -590,6 +590,10 @@ pub(super) struct ClientPaneCloseConfirmation {
 
 #[derive(Debug)]
 pub(super) struct ClientConfirmCloseOverlay {
+    /// Machine that owns the close target. The workspace and pane lookups below
+    /// resolve against this endpoint's snapshot, not the active one, so a
+    /// navigator close on a remote row stays on that machine.
+    pub(super) endpoint_id: ClientEndpointId,
     pub(super) workspace_id: String,
     pub(super) tab_target: Option<ClientTabCloseConfirmation>,
     pub(super) pane_target: Option<ClientPaneCloseConfirmation>,
@@ -702,6 +706,9 @@ pub(super) struct PendingEndpointRequest {
     pub(super) boot_id: String,
     pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
+    /// Machine the close request was aimed at, so the reopen dialog targets the
+    /// same workspace group instead of the active endpoint's.
+    pub(super) confirmation_endpoint_id: Option<ClientEndpointId>,
     pub(super) kind: PendingEndpointKind,
 }
 

@@ -904,7 +904,7 @@ fn direct_agent_focus_repaints_when_releasing_a_workspace_highlight() {
 fn cancelled_close_does_not_restore_an_older_navigation_highlight() {
     let mut state = local_navigation_state(false);
     request_local_navigation(&mut state, 2);
-    state.open_confirm_close_overlay("ws_1".into());
+    state.open_confirm_close_overlay(&state.active_endpoint_id.clone(), "ws_1".into());
     preview_key(&mut state, b"\x1b");
     assert_eq!(state.mode, ClientShellMode::Navigate);
     preview_key(&mut state, b"\x1b");
@@ -967,7 +967,7 @@ fn pane_confirm_cancel_returns_to_the_navigator_without_navigate_mode() {
 #[test]
 fn workspace_confirm_cancel_returns_to_the_navigator() {
     let mut state = state_with_navigator_then_confirm(|state| {
-        state.open_confirm_close_overlay("ws_1".into());
+        state.open_confirm_close_overlay(&state.active_endpoint_id.clone(), "ws_1".into());
     });
     assert!(matches!(
         state.overlay,
