@@ -323,20 +323,8 @@ fn all_naming_targets_preserve_submission_and_empty_semantics() {
             }
             let result = press(&mut state, KeyCode::Enter, KeyModifiers::NONE);
             assert!(state.overlay.is_none());
-            if empty && field == 1 {
+            if empty && matches!(field, 1 | 3) {
                 assert!(result.actions.is_empty());
-                continue;
-            }
-            // Fork: empty tab rename clears the custom name and falls back
-            // to the default label instead of cancelling.
-            if empty && field == 3 {
-                let [ClientShellAction::Endpoint { request, .. }] = &result.actions[..] else {
-                    panic!("naming target {field}");
-                };
-                assert!(
-                    matches!(&request.method, Method::TabRename(v) if v.label.is_empty()),
-                    "naming target {field}"
-                );
                 continue;
             }
             let [ClientShellAction::Endpoint { request, .. }] = &result.actions[..] else {
@@ -396,7 +384,7 @@ fn every_field_renders_long_unicode_across_resize_without_mutation() {
             for (width, height) in [(120, 40), (60, 20), (12, 6), (1, 1), (120, 40)] {
                 let before = editor(&mut state).clone();
                 if let Some(frame) = state.compose(width, height) {
-                    if let Some(cursor) = frame.cursor.filter(|cursor| cursor.visible) {
+                    if let Some(cursor) = frame.cursor.as_ref().filter(|cursor| cursor.visible) {
                         assert!(cursor.x < width && cursor.y < height, "field {field}");
                     }
                 }
