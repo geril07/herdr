@@ -1123,7 +1123,8 @@ impl ClientShellState {
             .then(|| target.workspace_id.clone())
         });
         if let Some(workspace_id) = workspace_id {
-            if self.open_close_confirmation(workspace_id, Some(tab_id.clone())) {
+            let endpoint_id = self.active_endpoint_id.clone();
+            if self.open_close_confirmation(&endpoint_id, workspace_id, Some(tab_id.clone())) {
                 outcome.repaint = true;
                 return;
             }
@@ -1140,6 +1141,7 @@ impl ClientShellState {
         };
         outcome.repaint = true;
         let return_to_navigator = confirm.return_to_navigator;
+        let endpoint_id = confirm.endpoint_id;
         let method = if let Some(target) = confirm.tab_target {
             if target.workspace.endpoint_id != self.active_endpoint_id
                 || !self.navigation_target_valid(&target.workspace)
@@ -1189,7 +1191,7 @@ impl ClientShellState {
                 close_group: true,
             })
         };
-        self.push_endpoint_method(method, outcome);
+        self.push_endpoint_method_to(&endpoint_id, method, outcome);
         self.restore_navigator_after_confirm(return_to_navigator);
     }
 
@@ -1205,14 +1207,29 @@ impl ClientShellState {
                 .matches_direct_key(key)
     }
 
-    pub(super) fn open_confirm_close_overlay(&mut self, workspace_id: String) {
-        self.open_close_confirmation(workspace_id, None);
+    pub(super) fn open_confirm_close_overlay(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        workspace_id: String,
+    ) {
+        self.open_close_confirmation(endpoint_id, workspace_id, None);
     }
 
     /// Open the pane-close confirmation. Returns false when no live target can
     /// be captured, so the caller can fall back to a direct close.
-    pub(super) fn open_confirm_pane_close_overlay(&mut self, pane_id: String) -> bool {
-        let Some(snapshot) = self.snapshot.as_deref() else {
+    pub(super) fn open_confirm_pane_close_overlay(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        pane_id: String,
+    ) -> bool {
+        // Read the owning machine's snapshot: the pane may live on a remote
+        // endpoint while another machine is active.
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
             return false;
         };
         let Some(pane) = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id) else {
@@ -1220,12 +1237,12 @@ impl ClientShellState {
         };
         let workspace_id = pane.workspace_id.clone();
         let detail = pane.label.clone().unwrap_or_else(|| pane_id.clone());
-        let Some(workspace) = self.navigation_target(&self.active_endpoint_id, &workspace_id)
-        else {
+        let Some(workspace) = self.navigation_target(endpoint_id, &workspace_id) else {
             return false;
         };
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
+                endpoint_id: endpoint_id.clone(),
                 workspace_id: workspace.workspace_id.clone(),
                 tab_target: None,
                 pane_target: Some(ClientPaneCloseConfirmation { pane_id, workspace }),
@@ -1237,8 +1254,19 @@ impl ClientShellState {
         true
     }
 
-    fn open_close_confirmation(&mut self, workspace_id: String, tab_id: Option<String>) -> bool {
-        let Some(snapshot) = self.snapshot.as_deref() else {
+    fn open_close_confirmation(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        workspace_id: String,
+        tab_id: Option<String>,
+    ) -> bool {
+        // The group and label come from the owning machine's snapshot.
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
             return false;
         };
         let Some(workspace) = snapshot
@@ -1273,8 +1301,7 @@ impl ClientShellState {
             return false;
         }
         let tab_target = if let Some(tab_id) = tab_id {
-            let Some(workspace) = self.navigation_target(&self.active_endpoint_id, &workspace_id)
-            else {
+            let Some(workspace) = self.navigation_target(endpoint_id, &workspace_id) else {
                 return false;
             };
             Some(ClientTabCloseConfirmation { tab_id, workspace })
@@ -1303,6 +1330,7 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::ConfirmClose(
             ClientConfirmCloseOverlay {
+                endpoint_id: endpoint_id.clone(),
                 workspace_id,
                 tab_target,
                 pane_target: None,

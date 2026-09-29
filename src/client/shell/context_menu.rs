@@ -246,8 +246,9 @@ impl ClientShellState {
                 }
             }
             ClientContextMenuAction::Close => {
+                let endpoint_id = self.active_endpoint_id.clone();
                 if self.config.confirm_close {
-                    self.open_confirm_close_overlay(workspace_id);
+                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
                 } else {
                     self.push_endpoint_method(
                         crate::api::schema::Method::WorkspaceClose(
@@ -457,8 +458,9 @@ impl ClientShellState {
                 outcome,
             ),
             ClientContextMenuAction::ClosePane => {
+                let endpoint_id = self.active_endpoint_id.clone();
                 if self.config.confirm_pane_close
-                    && self.open_confirm_pane_close_overlay(pane_id.clone())
+                    && self.open_confirm_pane_close_overlay(&endpoint_id, pane_id.clone())
                 {
                     // The dialog owns the close from here.
                 } else {
