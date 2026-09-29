@@ -90,14 +90,14 @@ pub(crate) fn keybind_help_groups(
                         binding_label(&keybinds.navigate.workspace_up),
                         binding_label(&keybinds.navigate.workspace_down)
                     ),
-                    "workspace list",
+                    "move selection",
                 ),
                 entry(
                     format!(
                         "enter / {}",
                         binding_label(&keybinds.navigate.workspace_open)
                     ),
-                    "open workspace",
+                    "open workspace / agent",
                 ),
                 entry(
                     format!(
@@ -110,7 +110,7 @@ pub(crate) fn keybind_help_groups(
                     "move focus",
                 ),
                 entry("tab / shift+tab", "switch sidebar section"),
-                entry("1..9", "switch workspace"),
+                entry("1..9", "open workspace / agent"),
             ],
         ),
         (
@@ -277,6 +277,36 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].1[0].1, "close pane");
         assert!(filter_keybind_help_groups(groups(), "panes").is_empty());
+    }
+
+    #[test]
+    fn navigate_help_describes_both_sections() {
+        // Navigate mode is section-aware: up/down and 1..9 act on workspaces in
+        // the Spaces section and on agents in the Agents section. Labels that
+        // name only one of them are wrong for the other.
+        let groups = keybind_help_groups(&Keybinds::default(), &[]);
+        let navigation = groups
+            .iter()
+            .find(|(name, _)| *name == "navigation")
+            .map(|(_, entries)| entries.as_slice())
+            .expect("navigation help group");
+        let labels = navigation
+            .iter()
+            .map(|(_, description)| description.as_ref())
+            .collect::<Vec<&str>>();
+
+        assert!(
+            labels.contains(&"move selection"),
+            "up/down must not claim to move only the workspace list: {labels:?}"
+        );
+        assert_eq!(
+            labels
+                .iter()
+                .filter(|label| **label == "open workspace / agent")
+                .count(),
+            2,
+            "enter and 1..9 both act on the active section: {labels:?}"
+        );
     }
 
     #[test]
