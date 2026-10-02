@@ -2997,6 +2997,124 @@ fn navigator_footer_documents_the_browse_mode_keys() {
     );
 }
 
+/// Renders the navigator and returns each row's rendered text with its target,
+/// so tests can assert on the gutter decoration without recomputing row geometry.
+fn navigator_rows_by_target(state: &mut ClientShellState) -> Vec<(ClientNavigatorTarget, String)> {
+    let frame = state.compose(120, 34).expect("navigator frame");
+    let buffer = frame.to_ratatui_buffer().expect("frame buffer");
+    state
+        .hits
+        .navigator_rows
+        .iter()
+        .map(|(rect, target)| {
+            let text = (rect.x..rect.right())
+                .map(|x| buffer[(x, rect.y)].symbol())
+                .collect::<String>();
+            (target.clone(), text)
+        })
+        .collect()
+}
+
+fn navigator_row_text<'a>(
+    rows: &'a [(ClientNavigatorTarget, String)],
+    target: &ClientNavigatorTarget,
+) -> &'a str {
+    rows.iter()
+        .find(|(row_target, _)| row_target == target)
+        .map(|(_, text)| text.as_str())
+        .unwrap_or_else(|| panic!("navigator row for {target:?}"))
+}
+
+fn navigator_workspace_target(
+    state: &ClientShellState,
+    workspace_id: &str,
+) -> ClientNavigatorTarget {
+    ClientNavigatorTarget::Workspace {
+        endpoint_id: state.active_endpoint_id.clone(),
+        workspace_id: workspace_id.into(),
+    }
+}
+
+#[test]
+fn navigator_workspace_rows_carry_a_collapse_caret() {
+    // The caret was dropped when upstream rewrote the picker to list agents and
+    // terminals, even though collapse/expand on space and e/c stayed. Asserted so
+    // the marker cannot silently disappear again.
+    let mut state = navigator_multi_workspace_state(true);
+    state.open_navigator_overlay();
+
+    let rows = navigator_rows_by_target(&mut state);
+    for workspace_id in ["ws_1", "ws_2"] {
+        let target = navigator_workspace_target(&state, workspace_id);
+        let text = navigator_row_text(&rows, &target);
+        assert!(
+            text.starts_with(" \u{25be}"),
+            "expanded {workspace_id} should start with a down caret, got {text:?}"
+        );
+    }
+
+    // Pane rows are not collapsible and must not claim the marker slot.
+    let pane = ClientNavigatorTarget::Pane {
+        endpoint_id: state.active_endpoint_id.clone(),
+        pane_id: "pane_1".into(),
+    };
+    let pane_text = navigator_row_text(&rows, &pane);
+    assert!(
+        !pane_text.contains('\u{25be}') && !pane_text.contains('\u{25b8}'),
+        "pane row should have no caret, got {pane_text:?}"
+    );
+
+    // Collapsing a workspace flips its caret and drops its pane rows.
+    press_navigator_key(&mut state, KeyCode::Char(' '));
+    let rows = navigator_rows_by_target(&mut state);
+    let text = navigator_row_text(&rows, &navigator_workspace_target(&state, "ws_1"));
+    assert!(
+        text.starts_with(" \u{25b8}"),
+        "collapsed ws_1 should start with a right caret, got {text:?}"
+    );
+    assert!(
+        !rows.iter().any(|(target, _)| *target == pane),
+        "collapsing ws_1 should hide its pane rows, rows: {rows:?}"
+    );
+}
+
+#[test]
+fn navigator_current_row_keeps_the_diamond_over_the_caret() {
+    // The focused pane claims the diamond, so its workspace row still shows the
+    // caret. Collapse both workspaces and select one of them: with no visible
+    // pane left to claim the marker, the workspace row must show the diamond.
+    let mut state = navigator_multi_workspace_state(true);
+    state.open_navigator_overlay();
+    press_navigator_key(&mut state, KeyCode::Char('e'));
+
+    let rows = navigator_rows_by_target(&mut state);
+    let marked = rows
+        .iter()
+        .filter(|(_, text)| text.contains('\u{25c6}'))
+        .count();
+    assert_eq!(
+        marked, 1,
+        "exactly one row keeps the diamond, rows: {rows:?}"
+    );
+
+    // Select the second workspace so the marker moves with the focus.
+    press_navigator_key(&mut state, KeyCode::Down);
+    let mut outcome = ClientShellInput::default();
+    state.accept_navigator_selection(&mut outcome);
+
+    state.open_navigator_overlay();
+    press_navigator_key(&mut state, KeyCode::Char('e'));
+    let rows = navigator_rows_by_target(&mut state);
+    let marked = rows
+        .iter()
+        .filter(|(_, text)| text.contains('\u{25c6}'))
+        .count();
+    assert_eq!(
+        marked, 1,
+        "the diamond must move to the newly focused workspace, rows: {rows:?}"
+    );
+}
+
 #[test]
 fn navigator_orders_worktree_groups_like_spaces_panel() {
     let mut projected = snapshot();

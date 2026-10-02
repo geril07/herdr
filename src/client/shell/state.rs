@@ -372,6 +372,9 @@ pub(super) struct ClientNavigatorRow {
     pub(super) status: Option<crate::api::schema::AgentStatus>,
     pub(super) stale: bool,
     pub(super) current: bool,
+    /// `Some(expanded)` on workspace rows, which are the only collapsible
+    /// level. `None` everywhere else, so the marker slot stays blank.
+    pub(super) workspace_expanded: Option<bool>,
     pub(super) target: ClientNavigatorTarget,
 }
 

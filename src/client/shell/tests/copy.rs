@@ -1035,16 +1035,17 @@ fn navigator_renders_every_terminal_in_workspace_sections() {
     let visible = visible_rows(&mut state, 30);
     assert_eq!(visible.len(), 7);
     for (row, prefix) in visible.iter().zip([
-        // Workspace rows carry the two-cell current-marker slot, so their
-        // indent is three cells wide. Pane rows place the slot after the
-        // tree connector, so their prefix is unchanged.
-        "   client",
-        " ├─ ",
-        " ├─ ",
-        " ├─ ",
-        " └─ ",
-        "   second",
-        " └─ ",
+        // Workspace rows carry a collapse caret cell plus the two-cell
+        // current-marker slot, so their indent is four cells wide. Pane rows
+        // leave the caret cell blank after the tree connector, keeping every
+        // label on the same column.
+        " \u{25be}  client",
+        " ├─   ",
+        " ├─   ",
+        " ├─   ",
+        " └─   ",
+        " \u{25be}  second",
+        " └─   ",
     ]) {
         assert!(
             row.starts_with(prefix),

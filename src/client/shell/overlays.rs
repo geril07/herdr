@@ -878,15 +878,24 @@ fn render_navigator_overlay(
         let padding = u16::from(r.depth.saturating_sub(u8::from(is_pane))) * 2 + 1;
         let connector_x = rect.x + padding;
         let indent = format!("{:width$}{connector}", "", width = usize::from(padding));
-        // The two-cell marker slot keeps status icons and labels aligned
-        // whether or not a row is the current one.
-        let current = if r.current { "◆ " } else { "  " };
+        // Caret and diamond get one cell each so neither hides the other: the
+        // collapse state must stay readable on the focused workspace, which is
+        // exactly the row the diamond lands on once its panes are hidden.
+        let caret = match r.workspace_expanded {
+            Some(true) => "\u{25be}",
+            Some(false) => "\u{25b8}",
+            None => " ",
+        };
+        let current = if r.current { "\u{25c6} " } else { "  " };
         let status = r
             .status
             .map(|s| status_icon(s, indicators))
             .unwrap_or_default();
         let status_separator = if status.is_empty() { "" } else { " " };
-        let label = format!("{indent}{current}{status}{status_separator}{}", r.label);
+        let label = format!(
+            "{indent}{caret}{current}{status}{status_separator}{}",
+            r.label
+        );
         let st = if r.status.is_none() {
             st.add_modifier(Modifier::BOLD)
         } else {
@@ -927,7 +936,7 @@ fn render_navigator_overlay(
             );
         }
         if let Some(status) = r.status {
-            let prefix = format!("{indent}{current}");
+            let prefix = format!("{indent}{caret}{current}");
             let status_style = if r.stale || ix == selected {
                 st
             } else {
