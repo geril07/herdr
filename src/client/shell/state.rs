@@ -49,6 +49,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) prompt_new_workspace_name: bool,
     pub(super) navigator_start_expanded: bool,
     pub(super) navigator_start_search_focused: bool,
+    pub(super) agent_picker_start_search_focused: bool,
     pub(super) confirm_close: bool,
     pub(super) confirm_pane_close: bool,
     pub(super) mouse_capture: bool,

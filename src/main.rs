@@ -307,6 +307,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Open the session navigator with the search field focused.
 # navigator_start_search_focused = false
 
+# Open the agent picker with the search field focused.
+# agent_picker_start_search_focused = false
+
 # Draw borders around split panes.
 # "auto" draws them only for split panes, "always" also frames a lone pane
 # (only while pane_outer_borders is enabled), "off" disables them.
