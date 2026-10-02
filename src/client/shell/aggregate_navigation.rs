@@ -500,6 +500,7 @@ pub(super) fn navigator_rows(
                                 stale,
                                 current: endpoint.endpoint_id == *active_endpoint_id
                                     && snapshot.focused_pane_id.as_deref() == Some(&pane.pane_id),
+                                workspace_expanded: None,
                                 target: ClientNavigatorTarget::Pane {
                                     endpoint_id: endpoint.endpoint_id.clone(),
                                     pane_id: pane.pane_id.clone(),
@@ -528,6 +529,7 @@ pub(super) fn navigator_rows(
                         stale,
                         current: is_focused_workspace
                             && !children.iter().any(|child| child.current),
+                        workspace_expanded: Some(expanded),
                         target: ClientNavigatorTarget::Workspace {
                             endpoint_id: endpoint.endpoint_id.clone(),
                             workspace_id: workspace.workspace_id.clone(),
@@ -548,6 +550,7 @@ pub(super) fn navigator_rows(
                     status: None,
                     stale,
                     current: false,
+                    workspace_expanded: None,
                     target: ClientNavigatorTarget::Machine {
                         endpoint_id: endpoint.endpoint_id.clone(),
                     },
