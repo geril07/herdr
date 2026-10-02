@@ -1011,6 +1011,12 @@
           "description": "Open the session navigator with the search field focused."
         },
         {
+          "key": "ui.agent_picker_start_search_focused",
+          "type": "boolean",
+          "default": "false",
+          "description": "Open the agent picker with the search field focused. While the search field holds focus, the b/w/i/d status filters and the F clear shortcut act as typed text instead."
+        },
+        {
           "key": "ui.pane_borders",
           "type": "enum",
           "default": "\"auto\"",

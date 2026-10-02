@@ -3096,6 +3096,25 @@ fn navigator_start_search_focused_preset_focuses_the_query_field() {
 }
 
 #[test]
+fn agent_picker_start_search_focused_preset_focuses_the_query_field() {
+    for start_search_focused in [false, true] {
+        let mut config = Config::default();
+        config.ui.agent_picker_start_search_focused = start_search_focused;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.open_agent_picker_overlay();
+        let Some(ClientShellOverlay::AgentPicker(picker)) = state.overlay.as_ref() else {
+            panic!("agent picker should be open");
+        };
+        assert_eq!(
+            picker.search_focused, start_search_focused,
+            "agent_picker_start_search_focused={start_search_focused}"
+        );
+    }
+}
+
+#[test]
 fn navigator_default_selection_targets_focused_workspace_or_pane() {
     let mut config = Config::default();
     config.ui.navigator_start_expanded = false;

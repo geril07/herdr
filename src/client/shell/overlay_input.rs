@@ -216,7 +216,7 @@ impl ClientShellState {
     pub(super) fn open_agent_picker_overlay(&mut self) {
         let mut picker = ClientAgentPickerOverlay {
             query: TextEditor::default(),
-            search_focused: false,
+            search_focused: self.config.agent_picker_start_search_focused,
             selected: None,
             scroll: 0,
             filter: None,

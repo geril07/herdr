@@ -176,6 +176,7 @@ impl ClientShellConfig {
             prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
             navigator_start_expanded: config.ui.navigator_start_expanded,
             navigator_start_search_focused: config.ui.navigator_start_search_focused,
+            agent_picker_start_search_focused: config.ui.agent_picker_start_search_focused,
             confirm_close: config.ui.confirm_close,
             confirm_pane_close: config.ui.confirm_pane_close,
             mouse_capture: config.ui.mouse_capture,
@@ -376,6 +377,7 @@ impl ClientShellConfig {
                 self.prompt_new_workspace_name = ui.prompt_new_workspace_name;
                 self.navigator_start_expanded = ui.navigator_start_expanded;
                 self.navigator_start_search_focused = ui.navigator_start_search_focused;
+                self.agent_picker_start_search_focused = ui.agent_picker_start_search_focused;
                 self.confirm_close = ui.confirm_close;
                 self.confirm_pane_close = ui.confirm_pane_close;
                 self.mouse_capture = ui.mouse_capture;
