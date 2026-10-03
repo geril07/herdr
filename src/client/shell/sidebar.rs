@@ -517,18 +517,45 @@ fn parent_group_key(snapshot: &ClientShellSnapshot, index: usize) -> Option<Stri
     if worktree.is_linked_worktree {
         return None;
     }
-    (snapshot
+    snapshot
         .workspaces
         .iter()
-        .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
-                .is_some_and(|candidate| candidate.key == worktree.key)
+        .any(|candidate| {
+            candidate.worktree.as_ref().is_some_and(|candidate| {
+                candidate.key == worktree.key && candidate.is_linked_worktree
+            })
         })
-        .count()
-        >= 2)
         .then(|| worktree.key.clone())
+}
+
+pub(in crate::client::shell) fn workspace_close_is_group(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+) -> bool {
+    let Some(worktree) = workspace
+        .worktree
+        .as_ref()
+        .filter(|worktree| !worktree.is_linked_worktree)
+    else {
+        return false;
+    };
+    let mut has_child = false;
+    for member in &snapshot.workspaces {
+        if member.workspace_id == workspace.workspace_id {
+            continue;
+        }
+        if let Some(candidate) = member
+            .worktree
+            .as_ref()
+            .filter(|candidate| candidate.key == worktree.key)
+        {
+            if !candidate.is_linked_worktree {
+                return false;
+            }
+            has_child = true;
+        }
+    }
+    has_child
 }
 
 pub(in crate::client::shell) fn render_parent_group_toggle(
@@ -580,10 +607,11 @@ pub(in crate::client::shell) fn displayed_workspace_status(
         .workspaces
         .iter()
         .filter(|candidate| {
-            candidate
-                .worktree
-                .as_ref()
-                .is_some_and(|candidate| candidate.key == worktree.key)
+            candidate.worktree.as_ref().is_some_and(|member| {
+                member.key == worktree.key
+                    && (member.is_linked_worktree
+                        || candidate.workspace_id == workspace.workspace_id)
+            })
         })
         .map(|candidate| candidate.agent_status)
         .max_by_key(|status| status_priority(*status))
