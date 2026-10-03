@@ -193,13 +193,17 @@ pub(crate) fn workspace_entries(
     let grouped = members
         .iter()
         .filter(|(_, indices)| {
-            indices.len() >= 2
-                && indices.iter().any(|index| {
-                    snapshot.workspaces[*index]
-                        .worktree
-                        .as_ref()
-                        .is_some_and(|worktree| !worktree.is_linked_worktree)
-                })
+            indices.iter().any(|index| {
+                snapshot.workspaces[*index]
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| worktree.is_linked_worktree)
+            }) && indices.iter().any(|index| {
+                snapshot.workspaces[*index]
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| !worktree.is_linked_worktree)
+            })
         })
         .map(|(key, _)| *key)
         .collect::<HashSet<_>>();
@@ -224,27 +228,27 @@ pub(crate) fn workspace_entries(
         let Some(group_members) = members.get(worktree.key.as_str()) else {
             continue;
         };
-        let parent = group_members
-            .iter()
-            .copied()
-            .find(|member| {
-                snapshot.workspaces[*member]
-                    .worktree
-                    .as_ref()
-                    .is_some_and(|worktree| !worktree.is_linked_worktree)
-            })
-            .unwrap_or(index);
-        entries.push(WorkspaceEntry {
-            index: parent,
-            indented: false,
-            last_child: false,
-        });
+        for parent in group_members.iter().copied().filter(|member| {
+            snapshot.workspaces[*member]
+                .worktree
+                .as_ref()
+                .is_some_and(|worktree| !worktree.is_linked_worktree)
+        }) {
+            entries.push(WorkspaceEntry {
+                index: parent,
+                indented: false,
+                last_child: false,
+            });
+        }
         if collapsed_groups.contains(&worktree.key) {
-            if let Some(active) = group_members
-                .iter()
-                .copied()
-                .find(|member| *member != parent && snapshot.workspaces[*member].focused)
-            {
+            if let Some(active) = group_members.iter().copied().find(|member| {
+                let workspace = &snapshot.workspaces[*member];
+                workspace.focused
+                    && workspace
+                        .worktree
+                        .as_ref()
+                        .is_some_and(|worktree| worktree.is_linked_worktree)
+            }) {
                 entries.push(WorkspaceEntry {
                     index: active,
                     indented: true,
@@ -256,7 +260,12 @@ pub(crate) fn workspace_entries(
         let children = group_members
             .iter()
             .copied()
-            .filter(|member| *member != parent)
+            .filter(|member| {
+                snapshot.workspaces[*member]
+                    .worktree
+                    .as_ref()
+                    .is_some_and(|worktree| worktree.is_linked_worktree)
+            })
             .collect::<Vec<_>>();
         for (child_index, child) in children.iter().enumerate() {
             entries.push(WorkspaceEntry {

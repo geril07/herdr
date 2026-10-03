@@ -565,6 +565,7 @@ pub(super) enum ClientContextMenuTarget {
         is_git: bool,
         is_linked_worktree: bool,
         has_worktree_children: bool,
+        close_group: bool,
         collapsed: bool,
     },
     Tab {
@@ -612,6 +613,7 @@ pub(super) struct ClientConfirmCloseOverlay {
     /// navigator close on a remote row stays on that machine.
     pub(super) endpoint_id: ClientEndpointId,
     pub(super) workspace_id: String,
+    pub(super) close_group: bool,
     pub(super) tab_target: Option<ClientTabCloseConfirmation>,
     pub(super) pane_target: Option<ClientPaneCloseConfirmation>,
     pub(super) title: String,
@@ -770,7 +772,17 @@ pub(crate) enum ClientShellNotificationEffect {
     System {
         title: String,
         body: Option<String>,
+        #[cfg(windows)]
+        target: Option<ClientSystemNotificationTarget>,
     },
+}
+
+#[cfg(windows)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClientSystemNotificationTarget {
+    pub(crate) endpoint_id: ClientEndpointId,
+    pub(crate) boot_id: String,
+    pub(crate) pane_id: String,
 }
 
 pub(super) struct ClientPendingNotification {

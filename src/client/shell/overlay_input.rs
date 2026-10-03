@@ -523,14 +523,25 @@ impl ClientShellState {
                 workspace_id,
             } => {
                 if self.config.confirm_close {
-                    self.open_confirm_close_overlay(&endpoint_id, workspace_id);
+                    self.open_confirm_close_overlay(&endpoint_id, workspace_id, None);
                 } else {
+                    let close_group = self
+                        .endpoints
+                        .iter()
+                        .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+                        .and_then(|endpoint| endpoint.snapshot.as_deref())
+                        .is_some_and(|snapshot| {
+                            snapshot.workspaces.iter().any(|workspace| {
+                                workspace.workspace_id == workspace_id
+                                    && super::sidebar::workspace_close_is_group(snapshot, workspace)
+                            })
+                        });
                     self.push_endpoint_method_to(
                         &endpoint_id,
                         crate::api::schema::Method::WorkspaceClose(
                             crate::api::schema::WorkspaceCloseParams {
                                 workspace_id,
-                                close_group: true,
+                                close_group,
                             },
                         ),
                         outcome,
@@ -1518,6 +1529,49 @@ impl ClientShellState {
         outcome.repaint = true;
     }
 
+    pub(super) fn request_workspace_close(
+        &mut self,
+        workspace_id: String,
+        close_group: Option<bool>,
+        outcome: &mut ClientShellInput,
+    ) {
+        let endpoint_id = self.active_endpoint_id.clone();
+        self.request_workspace_close_on(&endpoint_id, workspace_id, close_group, outcome);
+    }
+
+    fn request_workspace_close_on(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        workspace_id: String,
+        close_group: Option<bool>,
+        outcome: &mut ClientShellInput,
+    ) {
+        if self.config.confirm_close {
+            self.open_close_confirmation(endpoint_id, workspace_id, None, close_group);
+            return;
+        }
+        let close_group = close_group.unwrap_or_else(|| {
+            self.endpoints
+                .iter()
+                .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+                .and_then(|endpoint| endpoint.snapshot.as_deref())
+                .is_some_and(|snapshot| {
+                    snapshot.workspaces.iter().any(|workspace| {
+                        workspace.workspace_id == workspace_id
+                            && super::sidebar::workspace_close_is_group(snapshot, workspace)
+                    })
+                })
+        });
+        self.push_endpoint_method_to(
+            endpoint_id,
+            crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
+                workspace_id,
+                close_group,
+            }),
+            outcome,
+        );
+    }
+
     pub(super) fn request_tab_close(&mut self, tab_id: String, outcome: &mut ClientShellInput) {
         let workspace_id = self.snapshot.as_deref().and_then(|snapshot| {
             let target = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)?;
@@ -1530,7 +1584,8 @@ impl ClientShellState {
         });
         if let Some(workspace_id) = workspace_id {
             let endpoint_id = self.active_endpoint_id.clone();
-            if self.open_close_confirmation(&endpoint_id, workspace_id, Some(tab_id.clone())) {
+            if self.open_close_confirmation(&endpoint_id, workspace_id, Some(tab_id.clone()), None)
+            {
                 outcome.repaint = true;
                 return;
             }
@@ -1594,7 +1649,7 @@ impl ClientShellState {
         } else {
             crate::api::schema::Method::WorkspaceClose(crate::api::schema::WorkspaceCloseParams {
                 workspace_id: confirm.workspace_id,
-                close_group: true,
+                close_group: confirm.close_group,
             })
         };
         self.push_endpoint_method_to(&endpoint_id, method, outcome);
@@ -1620,8 +1675,9 @@ impl ClientShellState {
         &mut self,
         endpoint_id: &ClientEndpointId,
         workspace_id: String,
+        close_group: Option<bool>,
     ) {
-        self.open_close_confirmation(endpoint_id, workspace_id, None);
+        self.open_close_confirmation(endpoint_id, workspace_id, None, close_group);
     }
 
     /// Open the pane-close confirmation. Returns false when no live target can
@@ -1653,6 +1709,7 @@ impl ClientShellState {
             ClientConfirmCloseOverlay {
                 endpoint_id: endpoint_id.clone(),
                 workspace_id: workspace.workspace_id.clone(),
+                close_group: false,
                 tab_target: None,
                 pane_target: Some(ClientPaneCloseConfirmation { pane_id, workspace }),
                 title: "Close pane?".to_owned(),
@@ -1668,6 +1725,7 @@ impl ClientShellState {
         endpoint_id: &ClientEndpointId,
         workspace_id: String,
         tab_id: Option<String>,
+        close_group: Option<bool>,
     ) -> bool {
         // The group and label come from the owning machine's snapshot.
         let Some(snapshot) = self
@@ -1688,7 +1746,11 @@ impl ClientShellState {
         let group_key = workspace
             .worktree
             .as_ref()
-            .filter(|worktree| !worktree.is_linked_worktree)
+            .filter(|_| {
+                close_group.unwrap_or_else(|| {
+                    super::sidebar::workspace_close_is_group(snapshot, workspace)
+                })
+            })
             .map(|worktree| worktree.key.as_str());
         let group = group_key
             .map(|key| {
@@ -1741,6 +1803,7 @@ impl ClientShellState {
             ClientConfirmCloseOverlay {
                 endpoint_id: endpoint_id.clone(),
                 workspace_id,
+                close_group: closes_group,
                 tab_target,
                 pane_target: None,
                 title: if closes_group {
