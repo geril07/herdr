@@ -1,4 +1,5 @@
 use super::*;
+use unicode_width::UnicodeWidthChar;
 
 mod settings_overlay;
 mod worktree_overlays;
@@ -320,6 +321,41 @@ fn contrast(p: &Palette) -> ratatui::style::Color {
     match p.panel_bg {
         ratatui::style::Color::Reset => p.surface_dim,
         c => c,
+    }
+}
+
+/// Paint the highlight style over cells of already-drawn text whose char
+/// index is flagged in `matched`. Stops at `width` cells like `put_text`,
+/// so truncated matches never paint outside the row.
+fn put_label_highlight(
+    b: &mut Buffer,
+    rect: Rect,
+    text: &str,
+    matched: &[bool],
+    width: u16,
+    style: Style,
+) {
+    if width == 0 || rect.y >= b.area.bottom() {
+        return;
+    }
+    let end = rect
+        .x
+        .saturating_add(width)
+        .min(rect.right())
+        .min(b.area.right());
+    let mut x = rect.x;
+    for (ch, is_match) in text.chars().zip(matched.iter().copied()) {
+        if x >= end {
+            break;
+        }
+        if is_match {
+            b[(x, rect.y)].set_style(style);
+        }
+        x = x.saturating_add(
+            UnicodeWidthChar::width(ch)
+                .unwrap_or(0)
+                .min(u16::MAX as usize) as u16,
+        );
     }
 }
 
@@ -749,6 +785,12 @@ fn render_navigator_overlay(
         Style::default().fg(p.accent).bg(p.panel_bg),
     );
     let rows = super::aggregate_navigation::navigator_rows(endpoints, active_endpoint_id, n);
+    let fuzzy_query = super::fuzzy::parse_query(n.query.trim());
+    let highlight_on = !fuzzy_query.words.is_empty();
+    let highlight_style = Style::default()
+        .fg(p.accent)
+        .bg(p.panel_bg)
+        .add_modifier(Modifier::BOLD);
     let search = if n.search_focused {
         " / ".to_owned()
     } else if let Some(f) = n.filter {
@@ -935,6 +977,17 @@ fn render_navigator_overlay(
             &label,
             st,
         );
+        if highlight_on && !r.stale && ix != selected {
+            let matched = super::fuzzy::highlight_for_label(&label, &fuzzy_query);
+            put_label_highlight(
+                b,
+                rect,
+                &label,
+                &matched,
+                rect.width.saturating_sub(columns),
+                highlight_style,
+            );
+        }
         if is_pane {
             put_text(
                 b,
@@ -1097,6 +1150,12 @@ fn render_agent_picker_overlay(
     let i = panel(b, q, p.accent, p.panel_bg)?;
     let rows =
         super::aggregate_navigation::agent_picker_rows(endpoints, active_endpoint_id, sort, picker);
+    let fuzzy_query = super::fuzzy::parse_query(picker.query.trim());
+    let highlight_on = !fuzzy_query.words.is_empty();
+    let highlight_style = Style::default()
+        .fg(p.accent)
+        .bg(p.panel_bg)
+        .add_modifier(Modifier::BOLD);
     let search = if picker.search_focused {
         format!(" / {}", picker.query)
     } else if let Some(f) = picker.filter {
@@ -1232,6 +1291,10 @@ fn render_agent_picker_overlay(
         };
         let label = format!(" {current}{status} {ws_padded}  {agent_padded}{elapsed_suffix}");
         put_text(b, rect.x, rect.y, rect.width, &label, st);
+        if highlight_on && !r.stale && ix != selected {
+            let matched = super::fuzzy::highlight_for_label(&label, &fuzzy_query);
+            put_label_highlight(b, rect, &label, &matched, rect.width, highlight_style);
+        }
 
         if !r.stale && ix != selected {
             let prefix = format!(" {current}");
