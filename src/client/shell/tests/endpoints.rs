@@ -4039,6 +4039,71 @@ fn agent_picker_query_and_filter_narrows_agents() {
 }
 
 #[test]
+fn agent_picker_search_keystrokes_repaint() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    let mut a0 = agent("compiler", AgentStatus::Idle, 1);
+    a0.pane_id = "pane_1".into();
+    let mut a1 = agent("linter", AgentStatus::Working, 2);
+    a1.pane_id = "pane_2".into();
+    snap.agents = vec![a0, a1];
+    snap.panes = snap
+        .agents
+        .iter()
+        .map(|a| ClientShellPane {
+            pane_id: a.pane_id.clone(),
+            focused: a.pane_id == "pane_1",
+            ..snap.panes[0].clone()
+        })
+        .collect();
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+    state.open_agent_picker_overlay();
+
+    let press = |state: &mut ClientShellState, code, modifiers| {
+        state.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            code, modifiers,
+        ))])
+    };
+
+    // Enter search mode.
+    let outcome = press(&mut state, KeyCode::Char('/'), KeyModifiers::empty());
+    assert!(outcome.repaint, "opening search must repaint");
+    assert!(matches!(
+        state.overlay.as_ref(),
+        Some(ClientShellOverlay::AgentPicker(picker)) if picker.search_focused
+    ));
+
+    // Typing filters the rows and must schedule a repaint, otherwise the
+    // popup looks frozen while the query state already changed.
+    let outcome = press(&mut state, KeyCode::Char('c'), KeyModifiers::empty());
+    assert!(
+        outcome.repaint,
+        "typing in agent picker search must repaint"
+    );
+    let query = match state.overlay.as_ref() {
+        Some(ClientShellOverlay::AgentPicker(picker)) => picker.query.as_str().to_owned(),
+        _ => panic!("expected agent picker"),
+    };
+    assert_eq!(query, "c");
+
+    // Editing keys share the same path: backspace must repaint too.
+    let outcome = press(&mut state, KeyCode::Backspace, KeyModifiers::empty());
+    assert!(
+        outcome.repaint,
+        "backspace in agent picker search must repaint"
+    );
+
+    // Cursor-only moves change no content but move the visible cursor.
+    press(&mut state, KeyCode::Char('x'), KeyModifiers::empty());
+    let outcome = press(&mut state, KeyCode::Left, KeyModifiers::empty());
+    assert!(
+        outcome.repaint,
+        "cursor move in agent picker search must repaint"
+    );
+}
+
+#[test]
 fn agent_picker_fuzzy_subsequence_ranks_prefix_first() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let mut snap = snapshot();

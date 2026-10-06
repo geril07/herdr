@@ -1180,6 +1180,7 @@ impl ClientShellState {
                             picker.filter = None;
                             picker.selected = None;
                         }
+                        outcome.repaint = true;
                     }
                 }
                 return;
