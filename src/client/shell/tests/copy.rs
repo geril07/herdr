@@ -1106,11 +1106,12 @@ fn navigator_search_matches_non_adjacent_words_without_losing_the_pane_target() 
     };
     for (query, matches) in [
         ("alpha gamma", true),
-        ("  ALP\tGAM  ", true),
+        ("  alp\tgam  ", true),
+        ("ALP GAM", false),
         ("gamma alpha", true),
         ("beta gamma", true),
         ("alpha missing", false),
-        ("alphagamma", false),
+        ("alphagammax", false),
     ] {
         navigator.query = query.into();
         navigator.selected = None;
@@ -1171,6 +1172,7 @@ fn navigator_searches_ancestor_context_and_keeps_split_agents_individually_actio
         ("", None, vec!["pane_1", "pane_2"]),
         ("review", None, vec!["pane_1", "pane_2"]),
         ("client-shell", None, vec!["pane_1", "pane_2"]),
+        ("clnt-shel", None, vec!["pane_1", "pane_2"]),
         ("main", None, vec!["pane_1", "pane_2"]),
         ("claude", None, vec!["pane_2"]),
         ("checking navigation", None, vec!["pane_2"]),
@@ -1695,7 +1697,7 @@ fn navigator_render_scale_profile() {
         (64, 2, 4),
         (128, 4, 1),
     ] {
-        for query in ["", "terminal 0"] {
+        for query in ["", "terminal 0", "trmnl 0", "mcld"] {
             let mut state =
                 ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
             state.set_snapshot(Box::new(navigator_scale_snapshot(workspaces, tabs, panes)));

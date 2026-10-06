@@ -4039,6 +4039,58 @@ fn agent_picker_query_and_filter_narrows_agents() {
 }
 
 #[test]
+fn agent_picker_fuzzy_subsequence_ranks_prefix_first() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snap = snapshot();
+    let mut nested = agent("my-compiler", AgentStatus::Idle, 2);
+    nested.pane_id = "pane_1".into();
+    let mut exact = agent("compiler", AgentStatus::Idle, 1);
+    exact.pane_id = "pane_2".into();
+    snap.agents = vec![nested, exact];
+    snap.panes = snap
+        .agents
+        .iter()
+        .map(|a| ClientShellPane {
+            pane_id: a.pane_id.clone(),
+            focused: a.pane_id == "pane_1",
+            ..snap.panes[0].clone()
+        })
+        .collect();
+    state.set_snapshot(Box::new(snap));
+    state.set_pane_surface(surface());
+
+    state.open_agent_picker_overlay();
+
+    let row_names = |state: &ClientShellState| {
+        let ClientShellOverlay::AgentPicker(picker) = state.overlay.as_ref().expect("agent picker")
+        else {
+            panic!("expected agent picker");
+        };
+        render::client_agent_picker_rows(
+            &state.endpoints,
+            &state.active_endpoint_id,
+            state.config.agent_panel_sort,
+            picker,
+        )
+        .into_iter()
+        .map(|r| r.agent_label)
+        .collect::<Vec<_>>()
+    };
+
+    // Subsequence (not substring) still finds both agents.
+    if let Some(ClientShellOverlay::AgentPicker(picker)) = state.overlay.as_mut() {
+        picker.query = TextEditor::from("cmplr");
+    }
+    assert_eq!(row_names(&state), vec!["compiler", "my-compiler"]);
+
+    // Prefix match outranks the mid-word match.
+    if let Some(ClientShellOverlay::AgentPicker(picker)) = state.overlay.as_mut() {
+        picker.query = TextEditor::from("comp");
+    }
+    assert_eq!(row_names(&state), vec!["compiler", "my-compiler"]);
+}
+
+#[test]
 fn agent_picker_enter_activates_selected_agent_pane() {
     let (mut state, endpoint_id) = state_with_scrollable_agents();
     state.open_agent_picker_overlay();

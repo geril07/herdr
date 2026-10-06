@@ -338,6 +338,9 @@ pub(super) fn navigator_rows(
     active_endpoint_id: &ClientEndpointId,
     navigator: &ClientNavigatorOverlay,
 ) -> Vec<ClientNavigatorRow> {
+    let fuzzy = super::fuzzy::parse_query(navigator.query.trim());
+    let use_fuzzy = !fuzzy.words.is_empty();
+    let mut scratch = super::fuzzy::FuzzyScratch::new();
     let query = navigator.query.trim().to_lowercase();
     let filter = |status| match navigator.filter {
         Some(ClientNavigatorFilter::Blocked) => status == crate::api::schema::AgentStatus::Blocked,
@@ -365,7 +368,16 @@ pub(super) fn navigator_rows(
             .as_deref()
             .map(|snapshot| endpoint.expanded_workspace_entries(snapshot));
         let stale = endpoint.status != ClientEndpointStatus::Online;
-        let endpoint_query_matches = !query.is_empty() && text(&endpoint.label);
+        let endpoint_hit: Option<i64> = if use_fuzzy {
+            super::fuzzy::match_any_field(&[endpoint.label.as_str()], &fuzzy, &mut scratch)
+        } else {
+            None
+        };
+        let endpoint_query_matches = if use_fuzzy {
+            endpoint_hit.is_some()
+        } else {
+            !query.is_empty() && text(&endpoint.label)
+        };
         let mut endpoint_rows = Vec::new();
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
             // Scope the collapse set to this endpoint once so the per-workspace
@@ -410,13 +422,40 @@ pub(super) fn navigator_rows(
                 let Some(workspace) = snapshot.workspaces.get(entry.index) else {
                     continue;
                 };
-                let workspace_matches = endpoint_query_matches
-                    || text(&workspace.label)
-                    || workspace.branch.as_deref().is_some_and(text);
+                let workspace_hit: Option<i64> = if use_fuzzy {
+                    let mut best = endpoint_hit;
+                    for candidate in [
+                        super::fuzzy::match_any_field(
+                            &[workspace.label.as_str()],
+                            &fuzzy,
+                            &mut scratch,
+                        ),
+                        workspace.branch.as_deref().and_then(|branch| {
+                            super::fuzzy::match_any_field(&[branch], &fuzzy, &mut scratch)
+                        }),
+                    ] {
+                        best = match (best, candidate) {
+                            (Some(known), Some(next)) => Some(known.max(next)),
+                            (Some(known), None) => Some(known),
+                            (None, Some(next)) => Some(next),
+                            (None, None) => None,
+                        };
+                    }
+                    best
+                } else {
+                    None
+                };
+                let workspace_matches = if use_fuzzy {
+                    workspace_hit.is_some()
+                } else {
+                    endpoint_query_matches
+                        || text(&workspace.label)
+                        || workspace.branch.as_deref().is_some_and(text)
+                };
                 let expanded = !collapsed.contains(workspace.workspace_id.as_str());
                 // A collapsed workspace builds no child rows at all, so its panes
                 // cannot be reached by the search filter and no row work is wasted.
-                let mut children = Vec::new();
+                let mut children: Vec<(ClientNavigatorRow, i64)> = Vec::new();
                 let workspace_tabs = if expanded {
                     tabs_by_workspace
                         .get(workspace.workspace_id.as_str())
@@ -427,7 +466,21 @@ pub(super) fn navigator_rows(
                 };
                 let multiple_tabs = workspace_tabs.len() > 1;
                 for tab in workspace_tabs {
-                    let tab_matches = workspace_matches || text(&tab.label);
+                    let tab_hit: Option<i64> = if use_fuzzy {
+                        let own = super::fuzzy::match_any_field(
+                            &[tab.label.as_str()],
+                            &fuzzy,
+                            &mut scratch,
+                        );
+                        match (workspace_hit, own) {
+                            (Some(known), Some(next)) => Some(known.max(next)),
+                            (Some(known), None) => Some(known),
+                            (None, Some(next)) => Some(next),
+                            (None, None) => None,
+                        }
+                    } else {
+                        (workspace_matches || text(&tab.label)).then_some(0)
+                    };
                     let tab_panes = panes_by_tab
                         .get(tab.tab_id.as_str())
                         .map(Vec::as_slice)
@@ -475,39 +528,71 @@ pub(super) fn navigator_rows(
                             .as_deref()
                             .or(pane.cwd.as_deref())
                             .unwrap_or_default();
-                        if filter(status)
-                            && (tab_matches
-                                || text(&label)
-                                || text(meta)
-                                || pane.cwd.as_deref().is_some_and(text)
-                                || agent_kind.is_some_and(text)
-                                || title.is_some_and(text)
-                                || agent
-                                    .and_then(|agent| agent.display_agent.as_deref())
-                                    .is_some_and(text)
-                                || text(&pane.pane_id))
-                        {
-                            children.push(ClientNavigatorRow {
-                                depth: 1 + depth_offset,
-                                label,
-                                meta: meta.to_owned(),
-                                detail: format!(
-                                    "{} / {} / {}",
-                                    workspace.label, tab.label, pane.pane_id
-                                ),
-                                agent: agent_kind.map(str::to_owned),
-                                status: Some(status),
-                                stale,
-                                current: endpoint.endpoint_id == *active_endpoint_id
-                                    && snapshot.focused_pane_id.as_deref() == Some(&pane.pane_id),
-                                workspace_expanded: None,
-                                target: ClientNavigatorTarget::Pane {
-                                    endpoint_id: endpoint.endpoint_id.clone(),
-                                    pane_id: pane.pane_id.clone(),
-                                },
-                            });
+                        if filter(status) {
+                            let pane_hit: Option<i64> = if use_fuzzy {
+                                super::fuzzy::match_any_field(
+                                    &[
+                                        label.as_str(),
+                                        meta,
+                                        pane.cwd.as_deref().unwrap_or_default(),
+                                        agent_kind.unwrap_or_default(),
+                                        title.unwrap_or_default(),
+                                        agent
+                                            .and_then(|agent| agent.display_agent.as_deref())
+                                            .unwrap_or_default(),
+                                        pane.pane_id.as_str(),
+                                    ],
+                                    &fuzzy,
+                                    &mut scratch,
+                                )
+                            } else {
+                                (text(&label)
+                                    || text(meta)
+                                    || pane.cwd.as_deref().is_some_and(text)
+                                    || agent_kind.is_some_and(text)
+                                    || title.is_some_and(text)
+                                    || agent
+                                        .and_then(|agent| agent.display_agent.as_deref())
+                                        .is_some_and(text)
+                                    || text(&pane.pane_id))
+                                .then_some(0)
+                            };
+                            let row_score = match (tab_hit, pane_hit) {
+                                (Some(tab), Some(pane)) => Some(tab.max(pane)),
+                                (Some(tab), None) => Some(tab),
+                                (None, Some(pane)) => Some(pane),
+                                (None, None) => None,
+                            };
+                            if let Some(score) = row_score {
+                                children.push((
+                                    ClientNavigatorRow {
+                                        depth: 1 + depth_offset,
+                                        label,
+                                        meta: meta.to_owned(),
+                                        detail: format!(
+                                            "{} / {} / {}",
+                                            workspace.label, tab.label, pane.pane_id
+                                        ),
+                                        agent: agent_kind.map(str::to_owned),
+                                        status: Some(status),
+                                        stale,
+                                        current: endpoint.endpoint_id == *active_endpoint_id
+                                            && snapshot.focused_pane_id.as_deref()
+                                                == Some(&pane.pane_id),
+                                        workspace_expanded: None,
+                                        target: ClientNavigatorTarget::Pane {
+                                            endpoint_id: endpoint.endpoint_id.clone(),
+                                            pane_id: pane.pane_id.clone(),
+                                        },
+                                    },
+                                    score,
+                                ));
+                            }
                         }
                     }
+                }
+                if use_fuzzy {
+                    children.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
                 }
                 if !filtering
                     || !children.is_empty()
@@ -528,14 +613,14 @@ pub(super) fn navigator_rows(
                         status: None,
                         stale,
                         current: is_focused_workspace
-                            && !children.iter().any(|child| child.current),
+                            && !children.iter().any(|child| child.0.current),
                         workspace_expanded: Some(expanded),
                         target: ClientNavigatorTarget::Workspace {
                             endpoint_id: endpoint.endpoint_id.clone(),
                             workspace_id: workspace.workspace_id.clone(),
                         },
                     });
-                    endpoint_rows.extend(children);
+                    endpoint_rows.extend(children.into_iter().map(|(row, _)| row));
                 }
             }
         }
@@ -601,6 +686,9 @@ pub(super) fn agent_picker_rows(
     sort: crate::config::AgentPanelSortConfig,
     picker: &ClientAgentPickerOverlay,
 ) -> Vec<ClientAgentPickerRow> {
+    let fuzzy = super::fuzzy::parse_query(picker.query.trim());
+    let use_fuzzy = !fuzzy.words.is_empty();
+    let mut scratch = super::fuzzy::FuzzyScratch::new();
     let query = picker.query.trim().to_lowercase();
     let filter = |status| match picker.filter {
         Some(ClientNavigatorFilter::Blocked) => status == crate::api::schema::AgentStatus::Blocked,
@@ -613,7 +701,7 @@ pub(super) fn agent_picker_rows(
     let federated = endpoints.len() > 1;
     let aggregate = aggregate_agent_rows(endpoints, active_endpoint_id, sort);
 
-    let mut rows = Vec::new();
+    let mut rows: Vec<(ClientAgentPickerRow, i64)> = Vec::new();
     for row in aggregate {
         let status = row.agent.agent_status;
         if !filter(status) {
@@ -664,45 +752,78 @@ pub(super) fn agent_picker_rows(
                 super::agent_sidebar::format_status_elapsed(now_unix_ms, status_changed_unix_ms)
             });
 
-        let text = |value: &str| value.to_lowercase().contains(&query);
-        let matches_query = query.is_empty()
-            || text(&agent_label)
-            || row.agent.name.as_deref().is_some_and(text)
-            || row.agent.display_agent.as_deref().is_some_and(text)
-            || row.agent.agent.as_deref().is_some_and(text)
-            || row.agent.title.as_deref().is_some_and(text)
-            || row.agent.terminal_title.as_deref().is_some_and(text)
-            || row
-                .agent
-                .terminal_title_stripped
-                .as_deref()
-                .is_some_and(text)
-            || pane.and_then(|p| p.label.as_deref()).is_some_and(text)
-            || status_text(status).contains(&query)
-            || text(workspace_label)
-            || text(tab_label)
-            || (federated && text(row.endpoint.label));
+        let row_score: Option<i64> = if use_fuzzy {
+            super::fuzzy::match_any_field(
+                &[
+                    agent_label.as_str(),
+                    row.agent.name.as_deref().unwrap_or_default(),
+                    row.agent.display_agent.as_deref().unwrap_or_default(),
+                    row.agent.agent.as_deref().unwrap_or_default(),
+                    row.agent.title.as_deref().unwrap_or_default(),
+                    row.agent.terminal_title.as_deref().unwrap_or_default(),
+                    row.agent
+                        .terminal_title_stripped
+                        .as_deref()
+                        .unwrap_or_default(),
+                    pane.and_then(|p| p.label.as_deref()).unwrap_or_default(),
+                    status_text(status),
+                    workspace_label,
+                    tab_label,
+                    if federated { row.endpoint.label } else { "" },
+                ],
+                &fuzzy,
+                &mut scratch,
+            )
+        } else {
+            let text = |value: &str| value.to_lowercase().contains(&query);
+            (query.is_empty()
+                || text(&agent_label)
+                || row.agent.name.as_deref().is_some_and(&text)
+                || row.agent.display_agent.as_deref().is_some_and(&text)
+                || row.agent.agent.as_deref().is_some_and(&text)
+                || row.agent.title.as_deref().is_some_and(&text)
+                || row.agent.terminal_title.as_deref().is_some_and(&text)
+                || row
+                    .agent
+                    .terminal_title_stripped
+                    .as_deref()
+                    .is_some_and(&text)
+                || pane.and_then(|p| p.label.as_deref()).is_some_and(&text)
+                || status_text(status).contains(&query)
+                || text(workspace_label)
+                || text(tab_label)
+                || (federated && text(row.endpoint.label)))
+            .then_some(0)
+        };
 
-        if !matches_query {
+        let Some(score) = row_score else {
             continue;
-        }
+        };
 
         let current = row.endpoint.endpoint_id == active_endpoint_id
             && snapshot.focused_pane_id.as_deref() == Some(&row.agent.pane_id);
 
-        rows.push(ClientAgentPickerRow {
-            endpoint_id: row.endpoint.endpoint_id.clone(),
-            pane_id: row.agent.pane_id.clone(),
-            agent_label,
-            title,
-            status,
-            status_elapsed,
-            workspace_tab,
-            current,
-            stale: row.endpoint.stale(),
+        rows.push((
+            ClientAgentPickerRow {
+                endpoint_id: row.endpoint.endpoint_id.clone(),
+                pane_id: row.agent.pane_id.clone(),
+                agent_label,
+                title,
+                status,
+                status_elapsed,
+                workspace_tab,
+                current,
+                stale: row.endpoint.stale(),
+            },
+            score,
+        ));
+    }
+    if use_fuzzy {
+        rows.sort_by(|a, b| {
+            (a.0.stale, std::cmp::Reverse(a.1)).cmp(&(b.0.stale, std::cmp::Reverse(b.1)))
         });
     }
-    rows
+    rows.into_iter().map(|(row, _)| row).collect()
 }
 
 pub(super) fn agent_picker_selected_index(
