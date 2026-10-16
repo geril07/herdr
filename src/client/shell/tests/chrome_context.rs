@@ -522,8 +522,12 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_workspace_cl
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     let mut close = ClientShellInput::default();
-    state.record_binding(
-        crate::input::KeybindMatch::Action(crate::input::KeybindAction::ClosePane),
+    // Exercise the server error fallback directly: last-pane keybindings now
+    // confirm locally before issuing a request.
+    state.push_endpoint_method(
+        crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget {
+            pane_id: "pane_1".into(),
+        }),
         &mut close,
     );
     let [ClientShellAction::Endpoint { request, .. }] = &close.actions[..] else {
@@ -700,6 +704,9 @@ fn confirm_dialog_ignores_y_without_alias() {
 fn pane_close_keybind_closes_directly_when_disabled() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.config.confirm_pane_close = false;
+    // Single-pane snapshot: also opt out of the workspace/last-pane confirm
+    // so the close stays direct.
+    state.config.confirm_close = false;
     state.set_snapshot(Box::new(snapshot()));
     state.set_pane_surface(surface());
     let mut close = ClientShellInput::default();
@@ -722,6 +729,9 @@ fn pane_close_context_menu_follows_pane_confirmation_setting() {
     for confirm_pane_close in [true, false] {
         let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
         state.config.confirm_pane_close = confirm_pane_close;
+        // Single-pane snapshot: keep the workspace/last-pane confirm off so
+        // the `false` arm stays direct; the `true` arm takes the pane dialog.
+        state.config.confirm_close = false;
         state.set_snapshot(Box::new(snapshot()));
         state.set_pane_surface(surface());
         state.compose(106, 20).expect("composed frame");

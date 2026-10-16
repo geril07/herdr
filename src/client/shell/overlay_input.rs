@@ -1025,7 +1025,14 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
-            if code == KeyCode::Char('/') && modifiers.is_empty() {
+            // Match the typed character so layouts where `/` needs Shift work
+            // when the host reports it as a shifted key (report-all panes).
+            // A shifted key needs the host's text or shifted alternate: bare
+            // `CSI 47;2u` is Shift+/, which is not `/` on most layouts.
+            let shifted_without_evidence = key.modifiers.contains(KeyModifiers::SHIFT)
+                && key.generated_text.is_none()
+                && key.shifted_codepoint.is_none();
+            if !shifted_without_evidence && crate::input::keybind_help_text_char(key) == Some('/') {
                 if let Some(ClientShellOverlay::Navigator(navigator)) = self.overlay.as_mut() {
                     navigator.search_focused = true;
                     navigator.filter = None;
@@ -1573,6 +1580,41 @@ impl ClientShellState {
         );
     }
 
+    pub(super) fn request_pane_close(&mut self, pane_id: String, outcome: &mut ClientShellInput) {
+        let target = self.snapshot.as_deref().and_then(|snapshot| {
+            let pane = snapshot.panes.iter().find(|pane| pane.pane_id == pane_id)?;
+            let tab = snapshot
+                .tabs
+                .iter()
+                .find(|tab| tab.tab_id == pane.tab_id && tab.workspace_id == pane.workspace_id)?;
+            (self.config.confirm_close
+                && !snapshot
+                    .panes
+                    .iter()
+                    .any(|other| other.tab_id == tab.tab_id && other.pane_id != pane_id)
+                && !snapshot.tabs.iter().any(|other| {
+                    other.workspace_id == tab.workspace_id && other.tab_id != tab.tab_id
+                }))
+            .then(|| (tab.workspace_id.clone(), tab.tab_id.clone()))
+        });
+        if let Some((workspace_id, tab_id)) = target {
+            let endpoint_id = self.active_endpoint_id.clone();
+            if self.open_close_confirmation(&endpoint_id, workspace_id, Some(tab_id), None) {
+                if let Some(ClientShellOverlay::ConfirmClose(confirm)) = self.overlay.as_mut() {
+                    if let Some(target) = confirm.tab_target.as_mut() {
+                        target.pane_id = Some(pane_id);
+                    }
+                }
+                outcome.repaint = true;
+                return;
+            }
+        }
+        self.push_endpoint_method(
+            crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget { pane_id }),
+            outcome,
+        );
+    }
+
     pub(super) fn request_tab_close(&mut self, tab_id: String, outcome: &mut ClientShellInput) {
         let workspace_id = self.snapshot.as_deref().and_then(|snapshot| {
             let target = snapshot.tabs.iter().find(|tab| tab.tab_id == tab_id)?;
@@ -1613,17 +1655,30 @@ impl ClientShellState {
                             && tab.workspace_id == target.workspace.workspace_id
                     })
                 })
+                || target.pane_id.as_ref().is_some_and(|pane_id| {
+                    !self.snapshot.as_deref().is_some_and(|snapshot| {
+                        snapshot.panes.iter().any(|pane| {
+                            pane.pane_id == *pane_id
+                                && pane.tab_id == target.tab_id
+                                && pane.workspace_id == target.workspace.workspace_id
+                        })
+                    })
+                })
             {
                 self.receive_endpoint_unavailable(
-                    "Close target changed; try closing the tab again".into(),
+                    "Close target changed; try closing it again".into(),
                 );
                 // Still leave the dialog behind the navigator it was opened from.
                 self.restore_navigator_after_confirm(return_to_navigator);
                 return;
             }
-            crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
-                tab_id: target.tab_id,
-            })
+            if let Some(pane_id) = target.pane_id {
+                crate::api::schema::Method::PaneClose(crate::api::schema::PaneTarget { pane_id })
+            } else {
+                crate::api::schema::Method::TabClose(crate::api::schema::TabTarget {
+                    tab_id: target.tab_id,
+                })
+            }
         } else if let Some(target) = confirm.pane_target {
             // Same staleness contract as the tab arm: the endpoint and workspace
             // must still match, and the pane must still exist in the live
@@ -1776,7 +1831,11 @@ impl ClientShellState {
             let Some(workspace) = self.navigation_target(endpoint_id, &workspace_id) else {
                 return false;
             };
-            Some(ClientTabCloseConfirmation { tab_id, workspace })
+            Some(ClientTabCloseConfirmation {
+                tab_id,
+                workspace,
+                pane_id: None,
+            })
         } else {
             None
         };

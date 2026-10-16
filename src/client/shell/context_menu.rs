@@ -454,7 +454,7 @@ impl ClientShellState {
                 {
                     // The dialog owns the close from here.
                 } else {
-                    self.push_endpoint_method(Method::PaneClose(PaneTarget { pane_id }), outcome)
+                    self.request_pane_close(pane_id, outcome)
                 }
             }
             _ => {}
