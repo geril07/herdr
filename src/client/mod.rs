@@ -2015,18 +2015,10 @@ async fn run_client_loop(
                         }
                     }
                     ServerMessage::Clipboard { data } => {
-                        if forward_clipboard(&data) {
-                            let (width, height) = state.reported_size;
-                            let frame = state.shell.as_mut().and_then(|shell| {
-                                shell
-                                    .show_copy_feedback(std::time::Instant::now())
-                                    .then(|| shell.compose(width, height))
-                                    .flatten()
-                            });
-                            if let Some(frame) = frame {
-                                state.present_frame(frame);
-                            }
-                        }
+                        // A pane application copies for itself and owns its own
+                        // feedback. The copy toast confirms herdr-initiated copies,
+                        // so a forwarded write must not raise it.
+                        let _ = forward_clipboard(&data);
                         let _ = io::stdout().flush();
                     }
                     ServerMessage::WindowTitle { title } => {
