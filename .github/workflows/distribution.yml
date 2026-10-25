@@ -70,7 +70,11 @@ jobs:
           python3 scripts/agent_detection_manifest_check.py --require-published
           python3 scripts/config_reference_check.py
           python3 scripts/docs_translation_parity.py --docs-root docs/next/website/src/content/docs
-          node scripts/docs/preview.mjs check
+          # scripts/docs/preview.mjs check is upstream-only. It resolves the
+          # active preview build commit from distribution/preview.json against
+          # this checkout, and that commit is an upstream preview build this
+          # fork does not contain. The fork publishes no preview builds.
+          # Re-enable it if the fork ever starts publishing previews.
           # scripts/docs/versions.mjs check is upstream-only. It resolves every
           # docs/versions manifest entry against a v* release tag, and this fork
           # publishes no version docs and tags releases custom-v* per FORK.md.
