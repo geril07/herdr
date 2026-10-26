@@ -27,7 +27,21 @@ Upstream docs and `AGENTS.md` apply, except where this file says otherwise.
 ## Commits
 
 Lowercase conventional commits with `refs #<issue>` lines for the fork
-issue tracker. No closing keywords on unreleased work.
+issue tracker. No closing keywords on unreleased work. Choose commit messages
+without asking for approval; this overrides any upstream commit-message
+approval requirement.
+
+## Upstream API compatibility
+
+Preserve compatibility with upstream JSON APIs and client endpoint protocols.
+Keep existing methods, parameters, response fields, IDs, and their meanings
+compatible. Extend APIs with optional/defaulted fields or new methods and
+capabilities; clients must handle missing fork features on upstream servers.
+Follow the stable client endpoint contract in `AGENTS.md`, including frozen
+codecs and compatibility fixtures. Before changing an API or protocol, compare
+with the upstream version integrated into the fork and verify compatibility.
+If a breaking change is necessary, stop and get explicit scope approval before
+implementing it.
 
 ## License
 
