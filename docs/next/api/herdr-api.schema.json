@@ -799,6 +799,12 @@
                 "null"
               ]
             },
+            "foreground_process_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "label": {
               "type": [
                 "string",
@@ -7910,6 +7916,12 @@
               "type": "boolean"
             },
             "foreground_cwd": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "foreground_process_name": {
               "type": [
                 "string",
                 "null"

@@ -629,6 +629,12 @@ fn live_process_group_member(process_group_id: u32, pid: u32) -> Option<ProcGrou
     (pgrp > 0 && pgrp as u32 == process_group_id).then_some(ProcGroupMember { pid, comm, state })
 }
 
+pub(crate) fn foreground_process_name(child_pid: u32) -> Option<String> {
+    let group = foreground_process_group_id(child_pid)?;
+    let (pgrp, name, _) = process_pgrp_comm_and_state(group)?;
+    (pgrp as u32 == group).then_some(name)
+}
+
 pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJob> {
     let (pgrp, name, state) = process_pgrp_comm_and_state(process_group_id)?;
     if pgrp as u32 != process_group_id {

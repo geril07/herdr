@@ -906,6 +906,33 @@ mod tests {
     }
 
     #[test]
+    fn process_tab_labels_keep_statuses_and_one_position_number() {
+        let mut snapshot = make_test_snapshot();
+        snapshot.tabs[0].label = "1 zsh".into();
+        snapshot.tabs[1].label = "2 sleep".into();
+        let mut cfg = Config::default();
+        cfg.ui.tab_bar_numbers = true;
+        let config = ClientShellConfig::from_config(&cfg);
+        let area = Rect::new(0, 0, 70, 1);
+        let mut buffer = Buffer::empty(area);
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut 0,
+            &mut false,
+            None,
+            &mut ShellHitMap::default(),
+        );
+        let row: String = (0..area.width).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(row.contains("● 1 zsh"), "{row}");
+        assert!(row.contains("● ● 2 sleep"), "{row}");
+        assert!(!row.contains("1 1"));
+        assert!(!row.contains("2 2"));
+    }
+
+    #[test]
     fn test_render_tab_bar_compact_spacing() {
         let snapshot = make_test_snapshot();
         let mut cfg = Config::default();
