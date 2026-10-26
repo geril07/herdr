@@ -90,6 +90,14 @@ impl App {
         &mut self,
         ev: AppEvent,
     ) -> Vec<crate::app::actions::PaneStateUpdate> {
+        if let AppEvent::ForegroundProcessChanged { pane_id, name } = ev {
+            if self.state.set_foreground_process_name(pane_id, name) {
+                if let Some((ws_idx, _)) = self.find_pane(pane_id) {
+                    self.emit_pane_updated(ws_idx, pane_id);
+                }
+            }
+            return Vec::new();
+        }
         let mut worktree_restore_failed = false;
         let ev = match ev {
             AppEvent::WorktreeRuntimeRestoreFailed {

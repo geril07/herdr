@@ -27,6 +27,7 @@ use crate::render_signal::RenderSignal;
 mod agent_detection;
 mod background_agent;
 mod cursor;
+mod foreground_process;
 mod input;
 mod kitty_keyboard;
 mod osc;
@@ -1519,6 +1520,7 @@ pub struct PaneRuntime {
     // Task handles for deterministic shutdown
     compression: TerminalCompressionTask,
     detect_handle: Option<tokio::task::AbortHandle>,
+    foreground_process: Option<foreground_process::ForegroundProcessTask>,
 }
 
 enum PaneRuntimeIo {
@@ -1701,6 +1703,7 @@ pub enum WheelRouting {
 
 impl Drop for PaneRuntime {
     fn drop(&mut self) {
+        self.foreground_process.take();
         // Abort detection task immediately and terminate the owned session.
         // The PTY actor shuts down before the process/session policy runs.
         if let Some(handle) = &self.detect_handle {
@@ -2232,6 +2235,7 @@ fn publish_reported_cwd(
 
 impl PaneRuntime {
     pub fn shutdown(mut self) {
+        self.foreground_process.take();
         if let Some(handle) = self.detect_handle.take() {
             handle.abort();
         }
@@ -2252,6 +2256,7 @@ impl PaneRuntime {
 
     #[cfg(unix)]
     pub fn preserve_for_handoff(mut self) {
+        self.foreground_process.take();
         if let Err(err) = self.io.release_after_commit() {
             warn!(
                 pane = self.pane_id.raw(),
@@ -2655,8 +2660,13 @@ impl PaneRuntime {
             detection_content_seq.clone(),
             full_lifecycle_authority_active.clone(),
             self_reported_agent_active.clone(),
-            events,
+            events.clone(),
         );
+        let foreground_process = Some(foreground_process::ForegroundProcessTask::spawn(
+            pane_id,
+            child_pid.clone(),
+            events,
+        ));
 
         Ok(Self {
             pane_id,
@@ -2679,6 +2689,7 @@ impl PaneRuntime {
             preserve_processes_on_drop: true,
             compression,
             detect_handle: Some(detect_handle),
+            foreground_process,
         })
     }
 
@@ -3271,6 +3282,12 @@ impl PaneRuntime {
             (None, Arc::new(Notify::new()), Arc::new(Mutex::new(None)))
         };
 
+        let foreground_process = Some(foreground_process::ForegroundProcessTask::spawn(
+            pane_id,
+            child_pid.clone(),
+            events,
+        ));
+
         Ok(Self {
             pane_id,
             terminal,
@@ -3292,6 +3309,7 @@ impl PaneRuntime {
             preserve_processes_on_drop: false,
             compression,
             detect_handle,
+            foreground_process,
         })
     }
 
@@ -4086,6 +4104,7 @@ impl PaneRuntime {
                 preserve_processes_on_drop: true,
                 compression,
                 detect_handle: Some(tokio::spawn(async {}).abort_handle()),
+                foreground_process: None,
             },
             rx,
         )
@@ -5438,6 +5457,7 @@ mod tests {
             preserve_processes_on_drop: true,
             compression,
             detect_handle: Some(tokio::spawn(async {}).abort_handle()),
+            foreground_process: None,
         };
 
         assert!(runtime.try_send_focus_event(crate::ghostty::FocusEvent::Gained));
@@ -5478,6 +5498,7 @@ mod tests {
             preserve_processes_on_drop: true,
             compression,
             detect_handle: Some(tokio::spawn(async {}).abort_handle()),
+            foreground_process: None,
         };
 
         assert!(!runtime.try_send_focus_event(crate::ghostty::FocusEvent::Gained));

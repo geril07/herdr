@@ -1707,6 +1707,14 @@ fn available_pane_shell_from_snapshot(
         .then(|| shell.name.clone())
 }
 
+pub(crate) fn foreground_process_name(child_pid: u32) -> Option<String> {
+    let job = select_pane_foreground_job_cached(child_pid)?;
+    job.processes
+        .into_iter()
+        .find(|process| process.pid == job.process_group_id)
+        .map(|process| process.name)
+}
+
 pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJob> {
     let snapshot = cached_foreground_processes();
     let entry = snapshot.entry(process_group_id)?;

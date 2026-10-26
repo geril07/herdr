@@ -327,6 +327,8 @@ Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row belo
 
 Set `tab_bar_numbers = true` under `[ui]` to show the current position before custom-named desktop tabs. Agent status indicators remain before the number, for example `● 2 logs`. The default is `false`.
 
+Unnamed desktop tabs show their position followed by the focused pane's foreground process name, for example `2 vim`. Inactive tabs use their last-focused pane. A manual tab name takes priority; saving an empty name restores process fallback. If process information is unavailable, only the position is shown. Process names refresh approximately once per second, so short commands may not appear. Only the process name is shown, never its arguments; wrappers such as `node` or `ssh` remain visible as wrappers, and the OS may shorten names. On Windows, the existing agent-oriented process selector can show the shell for ordinary commands. The cached name is also available as the optional `foreground_process_name` field in pane JSON responses. Stored tab names and API tab labels are unchanged.
+
 Set `sidebar_position = "right"` under `[ui]` to place the desktop sidebar on the right side of the terminal panes. The default is `"left"`.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:

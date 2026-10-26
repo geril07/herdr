@@ -1639,6 +1639,10 @@ impl AppState {
             // foreground client; they never touch AppState. Kept for AppEvent exhaustiveness.
             AppEvent::TerminalBell { .. } => Vec::new(),
             AppEvent::ClipboardWrite { .. } => Vec::new(),
+            AppEvent::ForegroundProcessChanged { pane_id, name } => {
+                self.set_foreground_process_name(pane_id, name);
+                Vec::new()
+            }
             AppEvent::TerminalCwdReported { pane_id, cwd } => {
                 if !cwd.is_absolute() || !cwd.is_dir() {
                     return Vec::new();
@@ -1688,6 +1692,28 @@ impl AppState {
             AppEvent::TabBarCommandFinished { .. } => Vec::new(),
             AppEvent::PluginCommandFinished { .. } => Vec::new(),
         }
+    }
+
+    pub(crate) fn set_foreground_process_name(
+        &mut self,
+        pane_id: PaneId,
+        name: Option<String>,
+    ) -> bool {
+        let Some(terminal_id) = self.workspaces.iter().find_map(|ws| {
+            ws.pane_state(pane_id)
+                .map(|pane| pane.attached_terminal_id.clone())
+        }) else {
+            return false;
+        };
+        let Some(terminal) = self.terminals.get_mut(&terminal_id) else {
+            return false;
+        };
+        if terminal.foreground_process_name == name {
+            return false;
+        }
+        terminal.foreground_process_name = name;
+        terminal.revision = terminal.revision.wrapping_add(1);
+        true
     }
 
     fn update_terminal_state<F>(&mut self, pane_id: PaneId, update: F) -> Option<PaneStateUpdate>
@@ -4181,6 +4207,36 @@ mod tests {
         let terminal = &state.terminals[&terminal_id];
         assert!(terminal.hook_authority.is_none());
         assert_eq!(terminal.state, AgentState::Unknown);
+    }
+
+    #[test]
+    fn foreground_process_updates_are_transient_and_do_not_change_agent_state() {
+        let mut state = app_with_workspaces(&["active"]);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0]
+            .pane_state(pane_id)
+            .unwrap()
+            .attached_terminal_id
+            .clone();
+        state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state(Some(Agent::Pi), AgentState::Working);
+        state.session_dirty = false;
+        let before = state.terminals[&terminal_id].revision;
+
+        assert!(state.set_foreground_process_name(pane_id, Some("vim".into())));
+        assert!(!state.set_foreground_process_name(pane_id, Some("vim".into())));
+        assert!(!state.set_foreground_process_name(PaneId::alloc(), Some("sleep".into())));
+        let terminal = &state.terminals[&terminal_id];
+        assert_eq!(terminal.foreground_process_name.as_deref(), Some("vim"));
+        assert_eq!(terminal.revision, before.wrapping_add(1));
+        assert_eq!(terminal.detected_agent, Some(Agent::Pi));
+        assert_eq!(terminal.state, AgentState::Working);
+        assert!(!state.session_dirty);
+        assert!(state.set_foreground_process_name(pane_id, None));
+        state.assert_invariants_for_test();
     }
 
     #[test]
