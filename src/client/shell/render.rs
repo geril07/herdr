@@ -107,8 +107,8 @@ pub(super) fn render_mode_bar(
                 segments.extend([
                     (" NAVIGATE ".to_owned(), mode_style),
                     (" esc back  ".to_owned(), base),
-                    ("↑/↓".to_owned(), key),
-                    (" move  ".to_owned(), base),
+                    ("↑/↓ ^n/^p".to_owned(), key),
+                    (" move  / search  ".to_owned(), base),
                     ("tab".to_owned(), key),
                     (" section  ".to_owned(), base),
                     (prefix_rhs(&keybinds.keybinds.help), key),
@@ -246,6 +246,8 @@ pub(super) struct EndpointWorkspaceOrderings<'a> {
 
 pub(super) struct ShellRenderState<'a> {
     pub(super) machine_diagnostics: &'a super::machine_diagnostics::MachineDiagnostics,
+    pub(super) sidebar_search: &'a super::sidebar_search::SidebarSearch,
+    pub(super) search_section: Option<SidebarNavSection>,
     pub(super) endpoints: &'a [ClientShellEndpoint],
     pub(super) active_endpoint_id: &'a ClientEndpointId,
     pub(super) collapsed_endpoints: &'a HashSet<ClientEndpointId>,

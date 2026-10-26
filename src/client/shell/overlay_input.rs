@@ -751,6 +751,17 @@ impl ClientShellState {
     }
 
     pub(super) fn insert_overlay_text(&mut self, text: &str) -> bool {
+        if self.sidebar_search_focused() {
+            if let Some(search) = self
+                .sidebar_search
+                .section_mut(self.navigate_section)
+                .as_mut()
+            {
+                search.query.insert(text);
+            }
+            self.sidebar_query_changed();
+            return true;
+        }
         if self.insert_worktree_overlay_text(text) {
             return true;
         }

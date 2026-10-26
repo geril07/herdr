@@ -2017,8 +2017,19 @@ impl ClientShellState {
                 self.workspace_press = None;
                 self.tab_press = None;
                 self.chrome_drag = None;
+                for (section, clear) in [
+                    (SidebarNavSection::Spaces, self.hits.spaces_search_clear),
+                    (SidebarNavSection::Agents, self.hits.agents_search_clear),
+                ] {
+                    if super::contains(clear, point) {
+                        self.clear_sidebar_search(section);
+                        outcome.repaint = true;
+                        return;
+                    }
+                }
                 // The toggle is painted over the agent scrollbar's last cell.
                 if super::contains(self.hits.sidebar_toggle, point) {
+                    self.finish_sidebar_search();
                     self.sidebar_collapsed = !self.sidebar_collapsed;
                     self.sidebar_collapsed_manual = true;
                     self.invalidate_pane_surface();
@@ -2234,6 +2245,7 @@ impl ClientShellState {
                         }),
                         outcome,
                     );
+                    self.finish_sidebar_search();
                     return;
                 }
                 let scrollbar_hit = self

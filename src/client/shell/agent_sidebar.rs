@@ -85,6 +85,9 @@ pub(super) fn render_agent_panel(
     agent_scroll: &mut usize,
     selected_pane_id: Option<&str>,
     expanded_entries: &[WorkspaceEntry],
+    search: Option<&super::sidebar_search::SectionSearch>,
+    endpoint_id: &ClientEndpointId,
+    search_focused: bool,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -97,15 +100,28 @@ pub(super) fn render_agent_panel(
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None, expanded_entries);
+    let mut rows = agent_rows(snapshot, config, None, expanded_entries);
+    if let Some(search) = search {
+        rows.retain(|row| search.includes(endpoint_id, &row.pane_id));
+    }
+    hits.agents_search_clear = super::sidebar_search::render_controls(
+        buffer,
+        Rect::new(
+            area.x,
+            area.y + 1,
+            area.width,
+            area.height.saturating_sub(1).min(2),
+        ),
+        search,
+        search_focused,
+        rows.len(),
+        &config.palette,
+    );
     render_agent_list(
         buffer,
         area,
         &rows,
-        snapshot
-            .agent_view_label
-            .as_ref()
-            .map(|_| " no matching agents"),
+        (search.is_some() || snapshot.agent_view_label.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
         hits,
@@ -114,6 +130,9 @@ pub(super) fn render_agent_panel(
             hits.agents.push((rect, row.pane_id.clone()));
             let selected = selected_pane_id == Some(row.pane_id.as_str());
             render_agent_row(buffer, rect, row, config, selected);
+            if let Some(search) = search {
+                search.highlight(buffer, rect, &config.palette);
+            }
         },
     );
 }
@@ -153,7 +172,8 @@ pub(super) fn render_agent_panel_header(
         crate::config::AgentPanelSortConfig::Spaces => "grouped",
         crate::config::AgentPanelSortConfig::Priority => "priority",
     });
-    let sort_width = display_width(sort_label).min(area.width as usize) as u16;
+    let sort_width =
+        display_width(sort_label).min(usize::from(area.width.saturating_sub(12))) as u16;
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
         area.y + 1,

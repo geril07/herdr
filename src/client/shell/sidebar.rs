@@ -264,7 +264,42 @@ pub(crate) fn render_sidebar(
             .add_modifier(Modifier::BOLD),
     );
 
-    let entries = collapsed_entries;
+    let search = state.sidebar_search.spaces.as_ref();
+    let entries = if search.is_some_and(|search| search.filtering()) {
+        expanded_entries
+    } else {
+        collapsed_entries
+    };
+    let filtered_entries;
+    let entries = if let Some(search) = search.filter(|search| search.filtering()) {
+        filtered_entries = entries
+            .iter()
+            .copied()
+            .filter(|entry| {
+                search.includes(
+                    state.active_endpoint_id,
+                    &snapshot.workspaces[entry.index].workspace_id,
+                )
+            })
+            .collect::<Vec<_>>();
+        filtered_entries.as_slice()
+    } else {
+        entries
+    };
+    let count = entries.len();
+    hits.spaces_search_clear = super::super::sidebar_search::render_controls(
+        buffer,
+        Rect::new(
+            workspace_area.x,
+            workspace_area.y,
+            workspace_area.width,
+            workspace_area.height.min(2),
+        ),
+        state.sidebar_search.spaces.as_ref(),
+        state.search_section == Some(SidebarNavSection::Spaces),
+        count,
+        palette,
+    );
     let body = Rect::new(
         workspace_area.x,
         workspace_area.y.saturating_add(WORKSPACE_HEADER_ROWS),
@@ -274,6 +309,16 @@ pub(crate) fn render_sidebar(
             .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
     );
     hits.workspace_body = body;
+    if entries.is_empty() && search.is_some() && !body.is_empty() {
+        put_text(
+            buffer,
+            body.x,
+            body.y,
+            body.width,
+            " no matching spaces",
+            Style::default().fg(palette.overlay0),
+        );
+    }
     let row_heights = entries
         .iter()
         .map(|entry| {
@@ -309,11 +354,18 @@ pub(crate) fn render_sidebar(
         body.height,
         *state.workspace_scroll,
     );
-    if !body.is_empty() && std::mem::take(state.reveal_focused_workspace) {
-        if let Some(target) = entries
-            .iter()
-            .position(|entry| snapshot.workspaces[entry.index].focused)
-        {
+    let reveal_navigation = !body.is_empty() && std::mem::take(state.reveal_navigation_workspace);
+    if reveal_navigation || (!body.is_empty() && std::mem::take(state.reveal_focused_workspace)) {
+        if let Some(target) = entries.iter().position(|entry| {
+            let workspace = &snapshot.workspaces[entry.index];
+            if reveal_navigation {
+                state.selected_workspace_id.is_some_and(|target| {
+                    target.matches(state.active_endpoint_id, &workspace.workspace_id)
+                })
+            } else {
+                workspace.focused
+            }
+        }) {
             *state.workspace_scroll = super::scroll::list_scroll_start_to_reveal(
                 &row_heights,
                 &gaps,
@@ -379,6 +431,9 @@ pub(crate) fn render_sidebar(
             dragged,
             palette,
         );
+        if let Some(search) = search {
+            search.highlight(buffer, rect, palette);
+        }
         let group_toggle = render_parent_group_toggle(
             buffer,
             rect,
@@ -483,6 +538,9 @@ pub(crate) fn render_sidebar(
         state.agent_scroll,
         state.selected_agent.map(|target| target.pane_id.as_str()),
         expanded_entries,
+        state.sidebar_search.agents.as_ref(),
+        state.active_endpoint_id,
+        state.search_section == Some(SidebarNavSection::Agents),
         hits,
     );
 

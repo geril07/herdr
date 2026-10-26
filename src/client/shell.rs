@@ -35,6 +35,7 @@ mod preferences;
 mod render;
 mod scroll;
 mod settings;
+mod sidebar_search;
 mod state;
 mod surface_patch;
 mod text_editor;

@@ -10,7 +10,7 @@ pub(super) fn render_collapsed(
     selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
     hits: &mut ShellHitMap,
 ) {
-    let rows = agent_rows(endpoints, active_endpoint_id, config);
+    let rows = agent_rows(endpoints, active_endpoint_id, config, None);
     for (index, row) in rows.into_iter().take(area.height as usize).enumerate() {
         let rect = Rect::new(area.x, area.y + index as u16, area.width, 1);
         let selected = selected_agent
@@ -61,6 +61,8 @@ pub(super) fn render_expanded(
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
     selected_agent: Option<&super::agent_navigation::AgentNavigationTarget>,
+    search: Option<&super::sidebar_search::SectionSearch>,
+    search_focused: bool,
     hits: &mut ShellHitMap,
 ) {
     if !super::agent_sidebar::render_agent_panel_header(
@@ -72,12 +74,25 @@ pub(super) fn render_expanded(
     ) {
         return;
     }
-    let rows = agent_rows(endpoints, active_endpoint_id, config);
+    let rows = agent_rows(endpoints, active_endpoint_id, config, search);
+    hits.agents_search_clear = super::sidebar_search::render_controls(
+        buffer,
+        Rect::new(
+            area.x,
+            area.y + 1,
+            area.width,
+            area.height.saturating_sub(1).min(2),
+        ),
+        search,
+        search_focused,
+        rows.len(),
+        &config.palette,
+    );
     super::agent_sidebar::render_agent_list(
         buffer,
         area,
         &rows,
-        agent_view_label.map(|_| " no matching agents"),
+        (search.is_some() || agent_view_label.is_some()).then_some(" no matching agents"),
         config,
         agent_scroll,
         hits,
@@ -86,6 +101,9 @@ pub(super) fn render_expanded(
             let selected = selected_agent
                 .is_some_and(|target| target.matches(&row.endpoint_id, &row.agent.pane_id));
             super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config, selected);
+            if let Some(search) = search {
+                search.highlight(buffer, rect, &config.palette);
+            }
             if row.stale {
                 buffer.set_style(
                     rect,
@@ -110,7 +128,12 @@ impl ClientShellState {
         if body_height == 0 {
             return;
         }
-        let rows = agent_rows(&self.endpoints, &self.active_endpoint_id, &self.config);
+        let rows = agent_rows(
+            &self.endpoints,
+            &self.active_endpoint_id,
+            &self.config,
+            self.sidebar_search.agents.as_ref(),
+        );
         let Some(target) = rows
             .iter()
             .position(|row| &row.endpoint_id == endpoint_id && row.agent.pane_id == pane_id)
@@ -146,6 +169,7 @@ fn agent_rows(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
+    search: Option<&super::sidebar_search::SectionSearch>,
 ) -> Vec<EndpointAgentRow> {
     let now_unix_ms = super::agent_sidebar::current_unix_ms();
     let mut rendered_rows = endpoints
@@ -177,6 +201,9 @@ fn agent_rows(
         config.agent_panel_sort,
     )
     .into_iter()
+    .filter(|row| {
+        super::sidebar_search::includes(search, row.endpoint.endpoint_id, &row.agent.pane_id)
+    })
     .filter_map(|row| {
         let key = (row.endpoint.endpoint_id.clone(), row.agent.pane_id.clone());
         let mut agent = rendered_rows.remove(&key)?;

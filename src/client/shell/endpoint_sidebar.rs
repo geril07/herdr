@@ -305,7 +305,7 @@ pub(super) fn render_expanded(
         workspace_area.x,
         workspace_area.y,
         workspace_area.width,
-        " machines",
+        " spaces",
         Style::default()
             .fg(palette.overlay0)
             .add_modifier(Modifier::BOLD),
@@ -321,25 +321,74 @@ pub(super) fn render_expanded(
         },
     }
     let mut rows = Vec::new();
+    let search = state.sidebar_search.spaces.as_ref();
+    let searching = search.is_some_and(|search| search.filtering());
     for (endpoint_index, endpoint) in state.endpoints.iter().enumerate() {
         rows.push(Row::Endpoint(endpoint_index));
-        if state.collapsed_endpoints.contains(&endpoint.endpoint_id) {
+        if !searching && state.collapsed_endpoints.contains(&endpoint.endpoint_id) {
             continue;
         }
         if let Some(snapshot) = endpoint.snapshot.as_deref() {
-            let collapsed_groups = collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
-                .unwrap_or(&empty_collapsed_groups);
+            let collapsed_groups = if searching {
+                &empty_collapsed_groups
+            } else {
+                collapsed_groups_for_endpoint(state, &endpoint.endpoint_id)
+                    .unwrap_or(&empty_collapsed_groups)
+            };
             rows.extend(
                 endpoint
                     .workspace_entries(snapshot, collapsed_groups)
                     .iter()
                     .copied()
+                    .filter(|entry| {
+                        super::sidebar_search::includes(
+                            search,
+                            &endpoint.endpoint_id,
+                            &snapshot.workspaces[entry.index].workspace_id,
+                        )
+                    })
                     .map(|entry| Row::Workspace {
                         endpoint: endpoint_index,
                         entry,
                     }),
             );
         }
+    }
+    let count = rows
+        .iter()
+        .filter(|row| matches!(row, Row::Workspace { .. }))
+        .count();
+    hits.spaces_search_clear = super::sidebar_search::render_controls(
+        buffer,
+        Rect::new(
+            workspace_area.x,
+            workspace_area.y,
+            workspace_area.width,
+            workspace_area.height.min(2),
+        ),
+        search,
+        state.search_section == Some(SidebarNavSection::Spaces),
+        count,
+        palette,
+    );
+    if searching {
+        rows.retain(|row| match row {
+            Row::Endpoint(index) => {
+                state.endpoints[*index]
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| {
+                        snapshot.workspaces.iter().any(|ws| {
+                            super::sidebar_search::includes(
+                                search,
+                                &state.endpoints[*index].endpoint_id,
+                                &ws.workspace_id,
+                            )
+                        })
+                    })
+            }
+            Row::Workspace { .. } => true,
+        });
     }
     let body = Rect::new(
         workspace_area.x,
@@ -350,6 +399,16 @@ pub(super) fn render_expanded(
             .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
     );
     hits.workspace_body = body;
+    if count == 0 && search.is_some() && !body.is_empty() {
+        put_text(
+            buffer,
+            body.x,
+            body.y,
+            body.width,
+            " no matching spaces",
+            Style::default().fg(palette.overlay0),
+        );
+    }
     let row_heights = rows
         .iter()
         .map(|row| match row {
@@ -546,6 +605,9 @@ pub(super) fn render_expanded(
                     collapsed_groups,
                     palette,
                 );
+                if let Some(search) = search {
+                    search.highlight(buffer, rect, palette);
+                }
                 hits.workspaces.push(WorkspaceHit {
                     rect,
                     endpoint_id: endpoint.endpoint_id.clone(),
@@ -611,6 +673,8 @@ pub(super) fn render_expanded(
         config,
         state.agent_scroll,
         state.selected_agent,
+        state.sidebar_search.agents.as_ref(),
+        state.search_section == Some(SidebarNavSection::Agents),
         hits,
     );
     hits.sidebar_toggle = if on_right {

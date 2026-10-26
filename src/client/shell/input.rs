@@ -19,7 +19,7 @@ fn is_retained_selection_copy_key(key: &crate::input::TerminalKey) -> bool {
 ///
 /// Navigate mode checks this only after keybinding dispatch, so a configured
 /// Ctrl+[ binding keeps working and this stays a fallback cancel.
-fn is_ctrl_bracket_key(key: &crate::input::TerminalKey) -> bool {
+pub(super) fn is_ctrl_bracket_key(key: &crate::input::TerminalKey) -> bool {
     key.code == KeyCode::Char('[') && key.modifiers == KeyModifiers::CONTROL
 }
 
@@ -193,6 +193,11 @@ impl ClientShellState {
     }
 
     fn prepare_committed_text(&mut self, text: &str, outcome: &mut ClientShellInput) -> bool {
+        if self.sidebar_search_focused() {
+            self.insert_overlay_text(text);
+            outcome.repaint = true;
+            return true;
+        }
         if !(self.mode == ClientShellMode::Navigate && self.navigation_preview_action_blocked())
             && self.insert_copy_search_text(text)
         {
@@ -548,6 +553,12 @@ impl ClientShellState {
     }
 
     pub(super) fn modal_paste_target_active(&self) -> bool {
+        if self.sidebar_search_focused()
+            && !self.popup_pending
+            && self.popup_input_target().is_none()
+        {
+            return true;
+        }
         if self.popup_pending
             || self.popup_input_target().is_some()
             || (self.overlay.is_none()
@@ -606,7 +617,11 @@ impl ClientShellState {
             return false;
         }
         if let Some(text) = read_clipboard_text() {
-            let inserted = self.insert_copy_search_text(&text) || self.insert_overlay_text(&text);
+            let inserted = if self.sidebar_search_focused() {
+                self.insert_overlay_text(&text)
+            } else {
+                self.insert_copy_search_text(&text) || self.insert_overlay_text(&text)
+            };
             outcome.repaint |= inserted;
         }
         true
@@ -761,6 +776,22 @@ impl ClientShellState {
         use crate::input::{KeybindAction, KeybindDispatch, KeybindMatch};
 
         self.pending_workspace_highlight = None;
+        self.refresh_sidebar_search();
+        if self.route_sidebar_search_key(key, outcome) {
+            return;
+        }
+        if self.config.keybinds.matches_prefix(key) {
+            self.sidebar_search = super::sidebar_search::SidebarSearch::default();
+        }
+        if !self.mobile_layout_active()
+            && crate::input::keybind_help_text_char(key) == Some('/')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+        {
+            self.open_sidebar_search(self.navigate_section, outcome);
+            return;
+        }
         if key.code == KeyCode::Esc || self.config.keybinds.matches_prefix(key) {
             self.cancel_navigate(outcome);
             self.clear_navigate_preview();
@@ -774,6 +805,7 @@ impl ClientShellState {
             .navigate
             .workspace_up
             .matches_direct_key(key)
+            || (key.code == KeyCode::Char('p') && key.modifiers == KeyModifiers::CONTROL)
         {
             match self.navigate_section {
                 SidebarNavSection::Spaces => self.move_navigate_workspace(-1),
@@ -789,6 +821,7 @@ impl ClientShellState {
             .navigate
             .workspace_down
             .matches_direct_key(key)
+            || (key.code == KeyCode::Char('n') && key.modifiers == KeyModifiers::CONTROL)
         {
             match self.navigate_section {
                 SidebarNavSection::Spaces => self.move_navigate_workspace(1),
@@ -966,7 +999,7 @@ impl ClientShellState {
 
     fn cancel_navigate(&mut self, outcome: &mut ClientShellInput) {
         self.mode = self.copy_or_terminal_mode();
-        self.navigate_workspace_id = None;
+        self.clear_navigate_preview();
         outcome.repaint = true;
     }
 
