@@ -323,10 +323,7 @@ fn all_naming_targets_preserve_submission_and_empty_semantics() {
             }
             let result = press(&mut state, KeyCode::Enter, KeyModifiers::NONE);
             assert!(state.overlay.is_none());
-            // Empty workspace rename stays a no-op. An empty *tab* rename is not
-            // a no-op: it clears the custom name so the tab falls back to its
-            // default numbered label, so it is asserted on the normal path below.
-            if empty && field == 1 {
+            if empty && matches!(field, 1 | 3) {
                 assert!(result.actions.is_empty());
                 continue;
             }

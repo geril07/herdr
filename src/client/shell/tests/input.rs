@@ -964,6 +964,70 @@ fn every_configured_prefix_enters_prefix_mode() {
     }
 }
 
+fn open_tab_rename(label: &str, custom_label: bool, context_menu: bool) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut snapshot = snapshot();
+    snapshot.tabs[0].label = label.into();
+    snapshot.tabs[0].custom_label = custom_label;
+    state.set_snapshot(Box::new(snapshot));
+    if context_menu {
+        state.open_tab_context_menu("tab_1".into(), 30, 1);
+        let index = match state.overlay.as_ref() {
+            Some(ClientShellOverlay::ContextMenu(menu)) => menu
+                .items()
+                .iter()
+                .position(|item| item.action == ClientContextMenuAction::Rename)
+                .expect("rename item"),
+            _ => panic!("tab context menu"),
+        };
+        state.activate_context_menu_item(index, &mut ClientShellInput::default());
+    } else {
+        state.open_rename_tab_overlay();
+    }
+    state
+}
+
+#[test]
+fn rename_tab_overlay_starts_empty_only_for_auto_names() {
+    for context_menu in [false, true] {
+        for (label, custom_label, expected) in [("1", false, ""), ("backend", true, "backend")] {
+            let state = open_tab_rename(label, custom_label, context_menu);
+            let Some(ClientShellOverlay::Rename(rename)) = state.overlay.as_ref() else {
+                panic!("rename overlay");
+            };
+            assert_eq!(rename.input.as_str(), expected);
+        }
+    }
+}
+
+#[test]
+fn rename_tab_overlay_accepts_a_name_without_clearing_the_index() {
+    for context_menu in [false, true] {
+        let mut state = open_tab_rename("1", false, context_menu);
+        state.handle_input_bytes(b"backend");
+        let outcome = state.handle_input_bytes(b"\r");
+        assert!(state.overlay.is_none());
+        assert!(outcome.actions.iter().any(|action| matches!(
+            action,
+            ClientShellAction::Endpoint { request, .. }
+                if matches!(&request.method, crate::api::schema::Method::TabRename(params)
+                    if params.tab_id == "tab_1" && params.label == "backend")
+        )));
+    }
+}
+
+#[test]
+fn rename_tab_overlay_empty_auto_name_or_cancel_sends_nothing() {
+    for context_menu in [false, true] {
+        for key in [b"\r".as_slice(), b"\x1b".as_slice()] {
+            let mut state = open_tab_rename("1", false, context_menu);
+            let outcome = state.handle_input_bytes(key);
+            assert!(state.overlay.is_none());
+            assert!(outcome.actions.is_empty());
+        }
+    }
+}
+
 #[test]
 fn rename_tab_overlay_empty_input_sends_clear_for_default_fallback() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));

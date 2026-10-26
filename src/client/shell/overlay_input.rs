@@ -698,7 +698,7 @@ impl ClientShellState {
         };
         self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
             title: "rename tab",
-            input: TextEditor::new(&tab.label, false),
+            input: TextEditor::new(if tab.custom_label { &tab.label } else { "" }, false),
             target: ClientRenameTarget::Tab {
                 tab_id: tab.tab_id.clone(),
                 auto_name: !tab.custom_label,
@@ -1517,9 +1517,7 @@ impl ClientShellState {
                 auto_name,
                 original_name,
             } => {
-                // Empty input clears the custom name and falls back to the
-                // default numbered label; only an unchanged auto name is a no-op.
-                if auto_name && trimmed == original_name {
+                if auto_name && (trimmed.is_empty() || trimmed == original_name) {
                     None
                 } else {
                     Some(crate::api::schema::Method::TabRename(
