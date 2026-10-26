@@ -315,6 +315,7 @@ impl ClientShellState {
                 target: Some(target),
             });
         }
+        self.finish_sidebar_search();
         true
     }
 }

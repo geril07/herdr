@@ -57,6 +57,13 @@ impl ClientShellState {
             self.config.agent_panel_sort,
         )
         .into_iter()
+        .filter(|target| {
+            super::sidebar_search::includes(
+                self.sidebar_search.agents.as_ref(),
+                &target.endpoint_id,
+                &target.pane_id,
+            )
+        })
         .filter_map(|target| {
             let endpoint = self
                 .endpoints
@@ -146,6 +153,7 @@ impl ClientShellState {
     }
 
     pub(super) fn enter_navigate_mode(&mut self, section: SidebarNavSection) {
+        self.sidebar_search = super::sidebar_search::SidebarSearch::default();
         self.mobile_switcher_scroll = 0;
         self.reveal_mobile_workspace = false;
         self.mode = ClientShellMode::Navigate;
@@ -159,6 +167,7 @@ impl ClientShellState {
     }
 
     pub(super) fn clear_navigate_preview(&mut self) {
+        self.sidebar_search = super::sidebar_search::SidebarSearch::default();
         self.navigate_workspace_id = None;
         self.navigate_agent = None;
         self.navigate_section = SidebarNavSection::Spaces;
@@ -190,7 +199,7 @@ impl ClientShellState {
     /// Agent rows are variable height, so this must go through
     /// `reveal_endpoint_agent` (which measures real row heights) rather than
     /// treating the agent's position in the list as a scroll offset.
-    fn reveal_selected_navigate_agent(&mut self) {
+    pub(super) fn reveal_selected_navigate_agent(&mut self) {
         let Some(target) = self.navigate_agent.clone() else {
             return;
         };
@@ -217,7 +226,9 @@ impl ClientShellState {
             None => 0,
         };
         let target = targets[next].clone();
-        self.collapsed_endpoints.remove(&target.endpoint_id);
+        if self.sidebar_search.agents.is_none() {
+            self.collapsed_endpoints.remove(&target.endpoint_id);
+        }
         self.navigate_agent = Some(target);
         self.reveal_selected_navigate_agent();
     }

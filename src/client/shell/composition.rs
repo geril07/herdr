@@ -69,6 +69,10 @@ impl ClientShellState {
         });
         let mut render_state = render::ShellRenderState {
             machine_diagnostics: &self.machine_diagnostics,
+            sidebar_search: &self.sidebar_search,
+            search_section: self
+                .sidebar_search_focused()
+                .then_some(self.navigate_section),
             endpoints: &self.endpoints,
             active_endpoint_id: &self.active_endpoint_id,
             collapsed_endpoints: &self.collapsed_endpoints,
@@ -182,6 +186,7 @@ impl ClientShellState {
             self.reveal_mobile_workspace = true;
         }
         self.last_composed_size = Some((cols, rows));
+        self.refresh_sidebar_search();
         // Only the active navigate section highlights. Both sections can hold a
         // preview at once, so scoping keeps a stale highlight from the other
         // section visible in the sidebar.
@@ -248,6 +253,10 @@ impl ClientShellState {
             &self.config,
             render::ShellRenderState {
                 machine_diagnostics: &self.machine_diagnostics,
+                sidebar_search: &self.sidebar_search,
+                search_section: self
+                    .sidebar_search_focused()
+                    .then_some(self.navigate_section),
                 endpoints: &self.endpoints,
                 active_endpoint_id: &self.active_endpoint_id,
                 collapsed_endpoints: &self.collapsed_endpoints,
@@ -381,6 +390,9 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        if self.sidebar_search_focused() {
+            frame.cursor = None;
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self

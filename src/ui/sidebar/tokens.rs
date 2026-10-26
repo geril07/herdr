@@ -26,7 +26,7 @@ pub(crate) enum ResolvedTokenKind {
 }
 
 impl ResolvedTokenKind {
-    fn text_value(&self) -> Option<&str> {
+    pub(crate) fn text_value(&self) -> Option<&str> {
         match self {
             Self::StateText(value)
             | Self::StateElapsed(value)

@@ -104,7 +104,13 @@ impl ClientShellState {
             };
             // Arrow-key cycling must walk the same grouped order the sidebar
             // draws, so a collapsed group hides its children here too.
-            let collapsed_groups = if mobile && surface_available {
+            let collapsed_groups = if (mobile && surface_available)
+                || self
+                    .sidebar_search
+                    .spaces
+                    .as_ref()
+                    .is_some_and(|search| search.filtering())
+            {
                 &empty_collapsed_groups
             } else {
                 self.collapsed_groups_for_endpoint(&endpoint.endpoint_id)
@@ -115,6 +121,13 @@ impl ClientShellState {
                 .iter()
                 .copied()
             {
+                if !super::sidebar_search::includes(
+                    self.sidebar_search.spaces.as_ref(),
+                    &endpoint.endpoint_id,
+                    &snapshot.workspaces[entry.index].workspace_id,
+                ) {
+                    continue;
+                }
                 targets.push(WorkspaceNavigationTarget {
                     endpoint_id: endpoint.endpoint_id.clone(),
                     workspace_id: snapshot.workspaces[entry.index].workspace_id.clone(),
@@ -139,7 +152,14 @@ impl ClientShellState {
             None => 0,
         };
         let target = targets.swap_remove(next);
-        self.collapsed_endpoints.remove(&target.endpoint_id);
+        if !self
+            .sidebar_search
+            .spaces
+            .as_ref()
+            .is_some_and(|search| search.filtering())
+        {
+            self.collapsed_endpoints.remove(&target.endpoint_id);
+        }
         if self.endpoints.len() == 1 && !mobile {
             self.reveal_workspace(&target.workspace_id);
         }
@@ -182,7 +202,7 @@ impl ClientShellState {
                 self.reconcile_pending_workspace_highlight();
             }
             self.mode = ClientShellMode::Terminal;
-            self.navigate_workspace_id = None;
+            self.clear_navigate_preview();
         }
         outcome.repaint = true;
     }
