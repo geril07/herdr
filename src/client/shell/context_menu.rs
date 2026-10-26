@@ -339,7 +339,10 @@ impl ClientShellState {
                 if let Some(tab) = tab {
                     self.overlay = Some(ClientShellOverlay::Rename(ClientRenameOverlay {
                         title: "rename tab",
-                        input: TextEditor::new(&tab.label, false),
+                        input: TextEditor::new(
+                            if tab.custom_label { &tab.label } else { "" },
+                            false,
+                        ),
                         target: ClientRenameTarget::Tab {
                             tab_id,
                             auto_name: !tab.custom_label,
