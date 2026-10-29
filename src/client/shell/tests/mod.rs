@@ -259,6 +259,7 @@ mod input_conformance;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;
+mod layout_shortcuts;
 mod link_hover;
 mod mobile;
 mod mouse_selection;

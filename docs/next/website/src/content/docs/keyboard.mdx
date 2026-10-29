@@ -72,7 +72,13 @@ Press Esc or Ctrl+[ to leave workspace navigation. In the Go To picker, `/` also
 
 Pane input follows the keyboard modes requested by the app. Plain shells receive Ctrl+Shift+letter as its control byte; Super, Hyper, and Meta chords are dropped when the pane cannot represent them. Apps using Kitty keyboard input receive the modifiers and key events they request. Without report-all mode, modified Enter, Tab, and Backspace do not receive release reports. Keypad keys and modifier-only presses are not forwarded.
 
-On non-Latin layouts, Ctrl-only shortcuts such as Ctrl+W can use the physical base key reported by a Kitty-capable host. Latin layout characters, Ctrl+Shift chords, and AltGr keep their layout meaning. Terminals that do not report physical keys cannot provide the same layout-independent shortcuts.
+## Keyboard layouts
+
+Herdr commands work without switching back to English. A terminal reporting Kitty alternate keys lets Herdr try the standard PC-101 base key when the reported character has no matching command. For example, on Russian ЙЦУКЕН, `Alt+Ф` enters a prefix configured as `alt+a`, and `prefix+с` runs a command bound to `prefix+c`. Exact character bindings take precedence over automatic aliases.
+
+This applies to prefix entry, prefix and direct bindings, navigation, resize, copy-mode commands, and command-focused dialogs. Shift uses the standard PC-101 shifted key for the fallback, so a binding such as `prefix+|` still works when that physical key produces a different symbol. With no reported base key, standard Russian ЙЦУКЕН letters have a built-in fallback; unknown layouts and ambiguous legacy ASCII punctuation are not guessed.
+
+Text typed into panes, naming dialogs, and searches keeps its original layout. These command aliases do not change shortcuts inside shell programs or agents. Pane forwarding retains its existing behavior: non-Latin Ctrl-only chords can use a reported base key, while Latin layout characters, Ctrl+Shift, and AltGr keep their layout meaning.
 
 ## Editing text fields
 

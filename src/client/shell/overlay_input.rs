@@ -801,6 +801,27 @@ impl ClientShellState {
     ) {
         use crossterm::event::KeyModifiers;
 
+        let commands = match self.overlay.as_ref() {
+            Some(ClientShellOverlay::Onboarding) => "l",
+            Some(
+                ClientShellOverlay::ProductAnnouncement(_)
+                | ClientShellOverlay::ReleaseNotes(_)
+                | ClientShellOverlay::GlobalMenu(_),
+            ) => "jk",
+            Some(ClientShellOverlay::Settings(_)) => "hjkl ",
+            Some(ClientShellOverlay::Navigator(_)) => "G/jkpnubawidFcex ",
+            Some(ClientShellOverlay::AgentPicker(_)) => "G/jkpnubwidF",
+            Some(ClientShellOverlay::Help(_)) => "?/jkpn",
+            Some(ClientShellOverlay::WorktreeOpen(_)) => "/np",
+            _ => "",
+        };
+        let exact_command = matches!(key.code, KeyCode::Char(ch) if commands.contains(ch))
+            || crate::input::keybind_help_text_char(key).is_some_and(|ch| commands.contains(ch));
+        let alias = (!commands.is_empty() && !self.modal_paste_target_active() && !exact_command)
+            .then(|| key.shortcut_key())
+            .flatten();
+        let key = alias.as_ref().unwrap_or(key);
+
         if matches!(self.overlay, Some(ClientShellOverlay::Onboarding)) {
             if matches!(
                 key.code,
@@ -1025,7 +1046,10 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
-            if matches!(code, KeyCode::End | KeyCode::Char('G')) && modifiers.is_empty() {
+            if code == KeyCode::End && modifiers.is_empty()
+                || crate::input::keybind_help_text_char(key) == Some('G')
+                    && modifiers.difference(KeyModifiers::SHIFT).is_empty()
+            {
                 let last = self.overlay.as_ref().and_then(|overlay| match overlay {
                     ClientShellOverlay::Navigator(navigator) => render::client_navigator_rows(
                         &self.endpoints,
@@ -1227,7 +1251,10 @@ impl ClientShellState {
                 outcome.repaint = true;
                 return;
             }
-            if matches!(code, KeyCode::End | KeyCode::Char('G')) && modifiers.is_empty() {
+            if code == KeyCode::End && modifiers.is_empty()
+                || crate::input::keybind_help_text_char(key) == Some('G')
+                    && modifiers.difference(KeyModifiers::SHIFT).is_empty()
+            {
                 let last = self.overlay.as_ref().and_then(|overlay| match overlay {
                     ClientShellOverlay::AgentPicker(picker) => {
                         let rows = render::client_agent_picker_rows(
@@ -1740,6 +1767,13 @@ impl ClientShellState {
                 .keybinds
                 .confirm_accept
                 .matches_direct_key(key)
+            || key.shortcut_key().as_ref().is_some_and(|alias| {
+                self.config
+                    .keybinds
+                    .keybinds
+                    .confirm_accept
+                    .matches_direct_key(alias)
+            })
     }
 
     pub(super) fn open_confirm_close_overlay(

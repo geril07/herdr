@@ -24,6 +24,14 @@ pub struct LiveKeybindConfig {
 impl LiveKeybindConfig {
     /// Whether `key` is one of the configured prefix keys.
     pub fn matches_prefix(&self, key: &TerminalKey) -> bool {
+        self.matches_prefix_exact(key)
+            || key
+                .shortcut_key()
+                .as_ref()
+                .is_some_and(|alias| self.matches_prefix_exact(alias))
+    }
+
+    pub(crate) fn matches_prefix_exact(&self, key: &TerminalKey) -> bool {
         self.prefix
             .iter()
             .any(|combo| terminal_key_matches_combo(key, *combo))
