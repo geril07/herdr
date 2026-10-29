@@ -15,6 +15,7 @@ use base64::Engine as _;
 
 const PROFILE_ID: &str = "0123456789abcdef0123456789abcdef";
 const SSH: &str = r#"#!/bin/sh
+# Prefer fixture installations over a real system Herdr during rediscovery.
 printf 'ssh\n' >> "$TEST_ROOT/ssh-calls"
 control=; previous=; operation=; configuration=
 for arg do
@@ -59,13 +60,13 @@ case "$last" in
         esac
         if [ "$TEST_MODE" = offline ]; then echo 'test remote connection failed' >&2; exit 255; fi
         printf 'login banner\n'
-        PATH="$TEST_ROOT/remote bin:/usr/bin:/bin" exec /bin/sh -c "$last" ;;
+        PATH="$TEST_ROOT/remote bin:$HOME/.local/bin:/usr/bin:/bin" exec /bin/sh -c "$last" ;;
     '/bin/sh -s')
         script=$(cat)
         printf 'login banner\n'
         case "$script" in
             *'uname -s'*) printf 'herdr-remote-output-ready:1\n'; uname -s; uname -m ;;
-            *) PATH="$TEST_ROOT/remote bin:/usr/bin:/bin" exec /bin/sh -c "$script" ;;
+            *) PATH="$TEST_ROOT/remote bin:$HOME/.local/bin:/usr/bin:/bin" exec /bin/sh -c "$script" ;;
         esac ;;
     *) echo "unexpected command: $last" >&2; exit 2 ;;
 esac
