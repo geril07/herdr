@@ -4,13 +4,17 @@ mod lease;
 mod model;
 pub(crate) mod mouse;
 mod parse;
+mod shortcuts;
+
+pub(crate) use shortcuts::shifted_ascii_char;
 
 pub(crate) use keybind_help::{
     filter_keybind_help_groups, keybind_help_groups, keybind_help_text_char,
 };
 pub(crate) use keybindings::{
     resolve_direct_binding, resolve_indexed_action, resolve_non_indexed_action,
-    resolve_prefix_binding, KeybindAction, KeybindDispatch, KeybindMatch,
+    resolve_prefix_binding, resolve_prefix_binding_exact, KeybindAction, KeybindDispatch,
+    KeybindMatch,
 };
 pub(crate) use lease::{InputLease, InputLeaseKey, InputLeaseTable, RepeatPlan};
 #[cfg(not(windows))]

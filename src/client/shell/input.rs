@@ -6,8 +6,11 @@ use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 const LOCAL_INPUT_SOURCE: u8 = 0;
 
 fn is_retained_selection_copy_key(key: &crate::input::TerminalKey) -> bool {
-    matches!(key.code, KeyCode::Char('c' | 'C'))
-        && matches!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER)
+    let matches = |key: &crate::input::TerminalKey| {
+        matches!(key.code, KeyCode::Char('c' | 'C'))
+            && matches!(key.modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER)
+    };
+    matches(key) || key.shortcut_key().as_ref().is_some_and(matches)
 }
 
 /// True for Ctrl+[, the terminal-level equivalent of Esc.
@@ -20,17 +23,23 @@ fn is_retained_selection_copy_key(key: &crate::input::TerminalKey) -> bool {
 /// Navigate mode checks this only after keybinding dispatch, so a configured
 /// Ctrl+[ binding keeps working and this stays a fallback cancel.
 pub(super) fn is_ctrl_bracket_key(key: &crate::input::TerminalKey) -> bool {
-    key.code == KeyCode::Char('[') && key.modifiers == KeyModifiers::CONTROL
+    let matches = |key: &crate::input::TerminalKey| {
+        key.code == KeyCode::Char('[') && key.modifiers == KeyModifiers::CONTROL
+    };
+    matches(key) || key.shortcut_key().as_ref().is_some_and(matches)
 }
 
 pub(super) fn is_modal_paste_shortcut_for_platform(
     key: &crate::input::TerminalKey,
     macos: bool,
 ) -> bool {
+    let matches = |key: &crate::input::TerminalKey| {
+        matches!(key.code, KeyCode::Char('v' | 'V'))
+            && (key.modifiers.difference(KeyModifiers::SHIFT) == KeyModifiers::CONTROL
+                || macos && key.modifiers.difference(KeyModifiers::SHIFT) == KeyModifiers::SUPER)
+    };
     key.generated_text.as_deref().is_none_or(str::is_empty)
-        && matches!(key.code, KeyCode::Char('v' | 'V'))
-        && (key.modifiers.difference(KeyModifiers::SHIFT) == KeyModifiers::CONTROL
-            || macos && key.modifiers.difference(KeyModifiers::SHIFT) == KeyModifiers::SUPER)
+        && (matches(key) || key.shortcut_key().as_ref().is_some_and(matches))
 }
 
 fn is_modal_paste_shortcut(key: &crate::input::TerminalKey) -> bool {
@@ -94,8 +103,11 @@ impl ClientShellState {
     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
         matches!(
             self.mode,
-            ClientShellMode::Prefix | ClientShellMode::Navigate
-        )
+            ClientShellMode::Prefix
+                | ClientShellMode::Navigate
+                | ClientShellMode::Resize
+                | ClientShellMode::Copy
+        ) || self.overlay.is_some()
     }
 
     pub(crate) fn set_host_reports_key_releases(&mut self, reports: bool) {
@@ -690,6 +702,11 @@ impl ClientShellState {
 
         match self.mode {
             ClientShellMode::Terminal => {
+                if self.config.keybinds.matches_prefix_exact(key) {
+                    self.mode = ClientShellMode::Prefix;
+                    outcome.repaint = true;
+                    return None;
+                }
                 if let Some(binding) =
                     crate::input::resolve_direct_binding(&self.config.keybinds.keybinds, key)
                 {
@@ -711,7 +728,7 @@ impl ClientShellState {
                 } else {
                     ClientShellMode::Terminal
                 };
-                if self.config.keybinds.matches_prefix(key) {
+                if self.config.keybinds.matches_prefix_exact(key) {
                     self.mode = return_mode;
                     outcome.repaint = true;
                     return self.focused_pane_id().map(ClientInputTarget::Pane);
@@ -721,9 +738,16 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return None;
                 }
-                if let Some(binding) =
+                let exact_binding =
+                    crate::input::resolve_prefix_binding_exact(&self.config.keybinds.keybinds, key);
+                if exact_binding.is_none() && self.config.keybinds.matches_prefix(key) {
+                    self.mode = return_mode;
+                    outcome.repaint = true;
+                    return self.focused_pane_id().map(ClientInputTarget::Pane);
+                }
+                if let Some(binding) = exact_binding.or_else(|| {
                     crate::input::resolve_prefix_binding(&self.config.keybinds.keybinds, key)
-                {
+                }) {
                     self.mode = return_mode;
                     outcome.repaint = true;
                     self.record_binding(binding, outcome);
@@ -780,6 +804,29 @@ impl ClientShellState {
         if self.route_sidebar_search_key(key, outcome) {
             return;
         }
+        let navigate = &self.config.keybinds.keybinds.navigate;
+        let exact_command = [
+            &navigate.workspace_up,
+            &navigate.workspace_down,
+            &navigate.workspace_open,
+            &navigate.pane_left,
+            &navigate.pane_down,
+            &navigate.pane_up,
+            &navigate.pane_right,
+        ]
+        .into_iter()
+        .any(|binding| binding.matches_direct_key(key))
+            || crate::input::resolve_non_indexed_action(
+                &self.config.keybinds.keybinds,
+                key,
+                KeybindDispatch::Prefix,
+            )
+            .is_some()
+            || crate::input::keybind_help_text_char(key) == Some('/')
+            || (matches!(key.code, KeyCode::Char('n' | 'p'))
+                && key.modifiers == KeyModifiers::CONTROL);
+        let alias = (!exact_command).then(|| key.shortcut_key()).flatten();
+        let key = alias.as_ref().unwrap_or(key);
         if self.config.keybinds.matches_prefix(key) {
             self.sidebar_search = super::sidebar_search::SidebarSearch::default();
         }
@@ -1120,6 +1167,10 @@ impl ClientShellState {
             return;
         }
 
+        let alias = (!matches!(key.code, KeyCode::Char('h' | 'j' | 'k' | 'l')))
+            .then(|| key.shortcut_key())
+            .flatten();
+        let key = alias.as_ref().unwrap_or(key);
         let action = match key.code {
             KeyCode::Char('h') | KeyCode::Left => Some(crate::input::KeybindAction::ResizePaneLeft),
             KeyCode::Char('j') | KeyCode::Down => Some(crate::input::KeybindAction::ResizePaneDown),

@@ -80,10 +80,23 @@ pub(crate) fn resolve_direct_binding(
     keybinds: &Keybinds,
     key: &TerminalKey,
 ) -> Option<KeybindMatch> {
-    resolve_exact_binding(keybinds, key, KeybindDispatch::Direct)
+    resolve_exact_binding(keybinds, key, KeybindDispatch::Direct).or_else(|| {
+        key.shortcut_key()
+            .and_then(|alias| resolve_exact_binding(keybinds, &alias, KeybindDispatch::Direct))
+    })
 }
 
 pub(crate) fn resolve_prefix_binding(
+    keybinds: &Keybinds,
+    key: &TerminalKey,
+) -> Option<KeybindMatch> {
+    resolve_prefix_binding_exact(keybinds, key).or_else(|| {
+        key.shortcut_key()
+            .and_then(|alias| resolve_exact_binding(keybinds, &alias, KeybindDispatch::Prefix))
+    })
+}
+
+pub(crate) fn resolve_prefix_binding_exact(
     keybinds: &Keybinds,
     key: &TerminalKey,
 ) -> Option<KeybindMatch> {

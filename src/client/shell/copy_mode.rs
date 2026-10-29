@@ -109,6 +109,12 @@ impl ClientShellState {
         if self.route_copy_search_prompt_key(key, outcome) {
             return;
         }
+        let exact_command = crate::copy_mode::copy_mode_command_char(key.clone())
+            .is_some_and(|ch| "qyvV hjklgG0$^/?nNwbeWBE{}".contains(ch))
+            || (key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(key.code, KeyCode::Char('b' | 'f' | 'u' | 'd')));
+        let alias = (!exact_command).then(|| key.shortcut_key()).flatten();
+        let key = alias.as_ref().unwrap_or(key);
         match key.code {
             KeyCode::Esc => {
                 let should_clear = self.copy_mode.as_ref().is_some_and(|copy_mode| {

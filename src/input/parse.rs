@@ -95,6 +95,7 @@ fn parse_kitty_key_sequence(data: &str) -> Option<TerminalKey> {
     if let Some(shifted_codepoint) = shifted_codepoint {
         key = key.with_shifted_codepoint(shifted_codepoint);
     }
+    key.base_layout_codepoint = base_layout_codepoint;
     Some(key.with_generated_text(associated_text))
 }
 
@@ -980,7 +981,9 @@ mod tests {
             assert_ne!(*sequence, stripped);
             let key = parse_terminal_key_sequence(sequence).unwrap();
             let layout_key = parse_terminal_key_sequence(&stripped).unwrap();
-            assert_eq!(key, layout_key, "{sequence:?}");
+            let mut without_shortcut_metadata = key.clone();
+            without_shortcut_metadata.base_layout_codepoint = None;
+            assert_eq!(without_shortcut_metadata, layout_key, "{sequence:?}");
             for pane_mode in [&b""[..], b"\x1b[>1u", b"\x1b[>5u", b"\x1b[>31u"] {
                 assert_eq!(
                     crate::pane::test_encode_key_for_app(pane_mode, key.clone()),

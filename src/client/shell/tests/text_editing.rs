@@ -85,6 +85,36 @@ fn press(state: &mut ClientShellState, code: KeyCode, modifiers: KeyModifiers) -
 }
 
 #[test]
+fn layout_shortcuts_modal_paste_uses_the_base_key_but_keeps_committed_text() {
+    let key =
+        crate::input::parse_terminal_key_sequence("\x1b[1084:1052:118;6u").expect("Ctrl+Shift+V");
+    let mut state = shell(0);
+    *editor(&mut state) = TextEditor::default();
+    assert!(
+        state.handle_modal_paste_shortcut_with(&key, &mut ClientShellInput::default(), || Some(
+            "русский текст".into()
+        ),)
+    );
+    assert_eq!(editor(&mut state).as_str(), "русский текст");
+    let commit = key.with_generated_text(Some("м".into()));
+    assert!(!state.handle_modal_paste_shortcut_with(
+        &commit,
+        &mut ClientShellInput::default(),
+        || panic!("text is not a paste shortcut"),
+    ));
+}
+
+#[test]
+fn all_ten_fields_preserve_layout_text_with_shortcut_metadata() {
+    for field in 0..10 {
+        let mut state = shell(field);
+        *editor(&mut state) = TextEditor::default();
+        state.handle_input_bytes(b"\x1b[1092::97;1;1092u\x1b[1099:1067:115;2;1067u");
+        assert_eq!(editor(&mut state).as_str(), "фЫ", "field {field}");
+    }
+}
+
+#[test]
 fn all_ten_fields_route_shared_text_editing() {
     for field in 0..10 {
         let mut state = shell(field);

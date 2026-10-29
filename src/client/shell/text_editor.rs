@@ -169,7 +169,15 @@ impl TextEditor {
         }
         let previous_len = self.text.len();
         let mut content_changed = false;
-        let (code, modifiers) = crate::config::normalize_key_combo((key.code, key.modifiers));
+        let exact_command = matches!(key.code, KeyCode::Char(ch) if "abefhdukwy".contains(ch));
+        let alias = (!exact_command
+            && !key.modifiers.difference(KeyModifiers::SHIFT).is_empty()
+            && key.generated_text.is_none())
+        .then(|| key.shortcut_key())
+        .flatten();
+        let command_key = alias.as_ref().unwrap_or(key);
+        let (code, modifiers) =
+            crate::config::normalize_key_combo((command_key.code, command_key.modifiers));
         // Explicit text from the host is authoritative, including AltGr/composition.
         if let Some(text) = key
             .generated_text
