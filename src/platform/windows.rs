@@ -1707,12 +1707,31 @@ fn available_pane_shell_from_snapshot(
         .then(|| shell.name.clone())
 }
 
-pub(crate) fn foreground_process_name(child_pid: u32) -> Option<String> {
+pub(crate) fn foreground_process_observation(
+    child_pid: u32,
+) -> Option<super::ForegroundProcessObservation> {
     let job = select_pane_foreground_job_cached(child_pid)?;
-    job.processes
+    let group_id = job.process_group_id;
+    let leader = job
+        .processes
         .into_iter()
-        .find(|process| process.pid == job.process_group_id)
-        .map(|process| process.name)
+        .find(|process| process.pid == group_id)?;
+    let snapshot = cached_foreground_processes();
+    let children = snapshot
+        .children_by_parent
+        .get(&leader.pid)
+        .map(|indices| {
+            indices
+                .iter()
+                .filter_map(|index| snapshot.entries.get(*index))
+                .map(|entry| (entry.pid, entry.parent_pid, group_id, entry.name.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some(super::ForegroundProcessObservation {
+        name: leader.name,
+        child: super::newest_group_child(leader.pid, group_id, children),
+    })
 }
 
 pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJob> {

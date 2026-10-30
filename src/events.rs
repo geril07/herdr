@@ -86,6 +86,7 @@ pub enum AppEvent {
     ForegroundProcessChanged {
         pane_id: PaneId,
         name: Option<String>,
+        child_name: Option<String>,
     },
     /// Process detection identified an agent before its screen state was confirmed.
     AgentProcessDetected {

@@ -1080,6 +1080,12 @@
           "description": "Show position numbers before custom-named desktop tabs."
         },
         {
+          "key": "ui.tab_process_wrappers",
+          "type": "array",
+          "default": "[\"doas\", \"pkexec\", \"sudo\"]",
+          "description": "Programs that only launch another process. Their launched program is shown instead, so sudo vim reads as vim. Set to [] to always show the wrapper itself."
+        },
+        {
           "key": "ui.tab_bar_right",
           "type": "array",
           "default": "[]",

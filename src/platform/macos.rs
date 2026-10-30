@@ -471,12 +471,31 @@ pub fn foreground_job(child_pid: u32) -> Option<ForegroundJob> {
     })
 }
 
-pub(crate) fn foreground_process_name(child_pid: u32) -> Option<String> {
+pub(crate) fn foreground_process_observation(
+    child_pid: u32,
+) -> Option<super::ForegroundProcessObservation> {
     let group = foreground_process_group_id(child_pid)?;
     let info = process_bsdinfo(group)?;
-    (info.pbi_pgid == group)
-        .then(|| comm_from_bsdinfo(&info))
-        .flatten()
+    if info.pbi_pgid != group {
+        return None;
+    }
+    Some(super::ForegroundProcessObservation {
+        name: comm_from_bsdinfo(&info)?,
+        child: super::newest_group_child(group, group, process_group_members(group)),
+    })
+}
+
+/// Processes whose parent is the foreground leader and that stayed in its group.
+fn process_group_members(leader_pid: u32) -> Vec<(u32, u32, u32, String)> {
+    process_group_pids(leader_pid)
+        .into_iter()
+        .filter(|pid| *pid != leader_pid)
+        .filter_map(|pid| {
+            let info = process_bsdinfo(pid)?;
+            let name = comm_from_bsdinfo(&info)?;
+            Some((pid, info.pbi_ppid, info.pbi_pgid, name))
+        })
+        .collect()
 }
 
 pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJob> {
