@@ -317,6 +317,9 @@ mod tests {
         )))
         .unwrap();
         assert_eq!(snapshot.boot_id, "boot-v1");
+        // Generation-1 tabs predate the optional process name and must keep decoding.
+        assert_eq!(snapshot.tabs[0].label, "main");
+        assert_eq!(snapshot.tabs[0].foreground_process_name, None);
         assert_eq!(
             snapshot.workspaces[0].agent_status,
             crate::api::schema::AgentStatus::Unknown

@@ -1046,12 +1046,19 @@ pub struct ClientShellTab {
     pub tab_id: String,
     pub workspace_id: String,
     pub number: usize,
+    /// The tab's own name: its custom name, otherwise its position. Views that
+    /// decorate a name, such as the tab row appending a process name for an
+    /// unnamed tab, compose that decoration themselves.
     pub label: String,
     pub custom_label: bool,
     pub zoomed: bool,
     pub focused: bool,
     #[serde(deserialize_with = "deserialize_client_shell_agent_status")]
     pub agent_status: crate::api::schema::AgentStatus,
+    /// Foreground process of the tab's focused pane, as a client-composable
+    /// name. Absent from older endpoints and ignored by older clients.
+    #[serde(default)]
+    pub foreground_process_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2840,6 +2847,7 @@ mod tests {
                 zoomed: false,
                 focused: true,
                 agent_status: crate::api::schema::AgentStatus::Idle,
+                foreground_process_name: None,
             }],
             panes: vec![ClientShellPane {
                 pane_id: "w1:p1".into(),
