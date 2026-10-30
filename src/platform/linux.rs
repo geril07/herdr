@@ -629,10 +629,42 @@ fn live_process_group_member(process_group_id: u32, pid: u32) -> Option<ProcGrou
     (pgrp > 0 && pgrp as u32 == process_group_id).then_some(ProcGroupMember { pid, comm, state })
 }
 
-pub(crate) fn foreground_process_name(child_pid: u32) -> Option<String> {
+pub(crate) fn foreground_process_observation(
+    child_pid: u32,
+) -> Option<super::ForegroundProcessObservation> {
     let group = foreground_process_group_id(child_pid)?;
     let (pgrp, name, _) = process_pgrp_comm_and_state(group)?;
-    (pgrp as u32 == group).then_some(name)
+    if pgrp as u32 != group {
+        return None;
+    }
+    Some(super::ForegroundProcessObservation {
+        name,
+        child: super::newest_group_child(group, group, process_group_children(group)),
+    })
+}
+
+/// Direct children the foreground leader started, with their process group.
+fn process_group_children(leader_pid: u32) -> Vec<(u32, u32, u32, String)> {
+    process_group_children_with(
+        leader_pid,
+        |leader_pid, budget| process_task_children(leader_pid, leader_pid, budget),
+        process_pgrp_comm_and_state,
+    )
+}
+
+fn process_group_children_with(
+    leader_pid: u32,
+    mut children: impl FnMut(u32, &mut ForegroundScanBudget) -> Vec<u32>,
+    mut stat: impl FnMut(u32) -> Option<(i32, String, char)>,
+) -> Vec<(u32, u32, u32, String)> {
+    let mut budget = ForegroundScanBudget::for_probe();
+    children(leader_pid, &mut budget)
+        .into_iter()
+        .filter_map(|pid| {
+            let (pgrp, comm, _) = stat(pid)?;
+            Some((pid, leader_pid, pgrp as u32, comm))
+        })
+        .collect()
 }
 
 pub fn foreground_group_leader_job(process_group_id: u32) -> Option<ForegroundJob> {
@@ -1434,6 +1466,31 @@ mod tests {
         assert!(task_reads.borrow().contains(&220));
         assert!(!task_reads.borrow().contains(&9999));
         assert!(!member_reads.borrow().contains(&9999));
+    }
+
+    #[test]
+    fn group_children_keep_their_own_process_group_so_only_the_group_wins() {
+        let children = process_group_children_with(
+            2,
+            |_, _| vec![7, 8, 9],
+            |pid| match pid {
+                7 => Some((2, "vim".to_owned(), 'S')),
+                8 => Some((9, "background".to_owned(), 'S')),
+                _ => None,
+            },
+        );
+
+        assert_eq!(
+            children,
+            vec![
+                (7, 2, 2, "vim".to_owned()),
+                (8, 2, 9, "background".to_owned()),
+            ]
+        );
+        assert_eq!(
+            crate::platform::newest_group_child(2, 2, children).as_deref(),
+            Some("vim")
+        );
     }
 
     #[test]

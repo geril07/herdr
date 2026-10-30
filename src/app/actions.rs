@@ -1639,8 +1639,12 @@ impl AppState {
             // foreground client; they never touch AppState. Kept for AppEvent exhaustiveness.
             AppEvent::TerminalBell { .. } => Vec::new(),
             AppEvent::ClipboardWrite { .. } => Vec::new(),
-            AppEvent::ForegroundProcessChanged { pane_id, name } => {
-                self.set_foreground_process_name(pane_id, name);
+            AppEvent::ForegroundProcessChanged {
+                pane_id,
+                name,
+                child_name,
+            } => {
+                self.set_foreground_process(pane_id, name, child_name);
                 Vec::new()
             }
             AppEvent::TerminalCwdReported { pane_id, cwd } => {
@@ -1694,10 +1698,11 @@ impl AppState {
         }
     }
 
-    pub(crate) fn set_foreground_process_name(
+    pub(crate) fn set_foreground_process(
         &mut self,
         pane_id: PaneId,
         name: Option<String>,
+        child_name: Option<String>,
     ) -> bool {
         let Some(terminal_id) = self.workspaces.iter().find_map(|ws| {
             ws.pane_state(pane_id)
@@ -1708,10 +1713,13 @@ impl AppState {
         let Some(terminal) = self.terminals.get_mut(&terminal_id) else {
             return false;
         };
-        if terminal.foreground_process_name == name {
+        if terminal.foreground_process_name == name
+            && terminal.foreground_process_child == child_name
+        {
             return false;
         }
         terminal.foreground_process_name = name;
+        terminal.foreground_process_child = child_name;
         terminal.revision = terminal.revision.wrapping_add(1);
         true
     }
@@ -4226,17 +4234,53 @@ mod tests {
         state.session_dirty = false;
         let before = state.terminals[&terminal_id].revision;
 
-        assert!(state.set_foreground_process_name(pane_id, Some("vim".into())));
-        assert!(!state.set_foreground_process_name(pane_id, Some("vim".into())));
-        assert!(!state.set_foreground_process_name(PaneId::alloc(), Some("sleep".into())));
+        assert!(state.set_foreground_process(pane_id, Some("sudo".into()), None));
+        assert!(state.set_foreground_process(pane_id, Some("sudo".into()), Some("vim".into())));
+        assert!(!state.set_foreground_process(pane_id, Some("sudo".into()), Some("vim".into())));
+        assert!(!state.set_foreground_process(PaneId::alloc(), Some("sleep".into()), None));
         let terminal = &state.terminals[&terminal_id];
-        assert_eq!(terminal.foreground_process_name.as_deref(), Some("vim"));
-        assert_eq!(terminal.revision, before.wrapping_add(1));
+        assert_eq!(terminal.foreground_process_name.as_deref(), Some("sudo"));
+        assert_eq!(terminal.foreground_process_child.as_deref(), Some("vim"));
+        assert_eq!(terminal.revision, before.wrapping_add(2));
         assert_eq!(terminal.detected_agent, Some(Agent::Pi));
         assert_eq!(terminal.state, AgentState::Working);
         assert!(!state.session_dirty);
-        assert!(state.set_foreground_process_name(pane_id, None));
+        assert!(state.set_foreground_process(pane_id, None, None));
         state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn wrapper_process_labels_show_the_launched_program() {
+        let mut state = app_with_workspaces(&["active"]);
+        let pane_id = *state.workspaces[0].panes.keys().next().unwrap();
+        let terminal_id = state.workspaces[0]
+            .pane_state(pane_id)
+            .unwrap()
+            .attached_terminal_id
+            .clone();
+        let label = |state: &AppState| {
+            state.terminals[&terminal_id]
+                .foreground_process_label(&state.tab_process_wrappers)
+                .map(str::to_owned)
+        };
+
+        state.set_foreground_process(pane_id, Some("sudo".into()), Some("vim".into()));
+        assert_eq!(state.tab_process_wrappers, ["doas", "pkexec", "sudo"]);
+        assert_eq!(label(&state).as_deref(), Some("vim"));
+        state.set_foreground_process(pane_id, Some("sudo".into()), None);
+        assert_eq!(label(&state).as_deref(), Some("sudo"));
+        state.set_foreground_process(pane_id, Some("npm".into()), Some("node".into()));
+        assert_eq!(label(&state).as_deref(), Some("npm"));
+        state.set_foreground_process(pane_id, Some("doas".into()), Some("vi".into()));
+        assert_eq!(label(&state).as_deref(), Some("vi"));
+
+        // The list is configuration, so an empty list keeps wrappers visible.
+        state.tab_process_wrappers.clear();
+        assert_eq!(label(&state).as_deref(), Some("doas"));
+
+        state.tab_process_wrappers = vec!["npm".into()];
+        state.set_foreground_process(pane_id, Some("npm".into()), Some("node".into()));
+        assert_eq!(label(&state).as_deref(), Some("node"));
     }
 
     #[test]

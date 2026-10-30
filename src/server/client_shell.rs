@@ -113,7 +113,11 @@ pub(super) fn snapshot_with_completions(
                 .panes
                 .get(&state.layout.focused())
                 .and_then(|pane| app.state.terminals.get(&pane.attached_terminal_id))
-                .and_then(|terminal| terminal.foreground_process_name.clone());
+                .and_then(|terminal| {
+                    terminal
+                        .foreground_process_label(&app.state.tab_process_wrappers)
+                        .map(str::to_owned)
+                });
             protocol::ClientShellTab {
                 focused: focused_tab_id.as_deref() == Some(tab_id.as_str()),
                 tab_id,
@@ -752,9 +756,9 @@ mod tests {
         app.state.active = Some(0);
         app.state.ensure_test_terminals();
         app.state
-            .set_foreground_process_name(first, Some("zsh".into()));
+            .set_foreground_process(first, Some("zsh".into()), None);
         app.state
-            .set_foreground_process_name(second, Some("sleep".into()));
+            .set_foreground_process(second, Some("sleep".into()), None);
 
         let project = |app: &app::App| snapshot(app, "boot", 1, None, None);
         let shell = project(&app);
@@ -789,7 +793,7 @@ mod tests {
         );
         app.state.workspaces[0].tabs[0].set_custom_name("backend".into());
         app.state
-            .set_foreground_process_name(first, Some("vim".into()));
+            .set_foreground_process(first, Some("vim".into()), None);
         let named = project(&app);
         assert_eq!(named.tabs[0].label, "backend");
         assert!(named.tabs[0].custom_label);
@@ -804,11 +808,26 @@ mod tests {
             cleared.tabs[0].foreground_process_name.as_deref(),
             Some("vim")
         );
-        app.state.set_foreground_process_name(first, None);
+        app.state.set_foreground_process(first, None, None);
         let unknown = project(&app);
         assert_eq!(unknown.tabs[0].label, "1");
         assert_eq!(unknown.tabs[0].foreground_process_name, None);
         assert_eq!(unknown.tabs[0].tab_id, shell.tabs[0].tab_id);
+
+        // A configured wrapper reports the program it launched, and the tab row
+        // still composes that name with the plain tab number.
+        app.state
+            .set_foreground_process(first, Some("sudo".into()), Some("vim".into()));
+        let wrapped = project(&app);
+        assert_eq!(
+            wrapped.tabs[0].foreground_process_name.as_deref(),
+            Some("vim")
+        );
+        app.state.tab_process_wrappers.clear();
+        assert_eq!(
+            project(&app).tabs[0].foreground_process_name.as_deref(),
+            Some("sudo")
+        );
         app.state.assert_invariants_for_test();
     }
 

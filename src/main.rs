@@ -345,6 +345,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Show position numbers before custom-named desktop tabs.
 # tab_bar_numbers = false
 
+# Programs that only launch another process. A tab shows the launched program
+# instead of the wrapper, so "sudo vim" reads as "vim". Set to [] to always show
+# the wrapper itself.
+# tab_process_wrappers = ["doas", "pkexec", "sudo"]
+
 # Ordered status entries at the right edge of the desktop tab bar.
 # Supported types: zoom, hostname, datetime, text, and command.
 # Hostname, datetime, and command entries resolve on the Herdr server.

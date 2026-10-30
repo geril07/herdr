@@ -213,7 +213,9 @@ pub fn foreground_group_leader_job(_process_group_id: u32) -> Option<ForegroundJ
 }
 
 /// Unsupported platform stub.
-pub(crate) fn foreground_process_name(_child_pid: u32) -> Option<String> {
+pub(crate) fn foreground_process_observation(
+    _child_pid: u32,
+) -> Option<super::ForegroundProcessObservation> {
     None
 }
 

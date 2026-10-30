@@ -29,23 +29,29 @@ impl ForegroundProcessTask {
                 loop {
                     interval.tick().await;
                     let pid = child_pid.load(Ordering::Acquire);
-                    let name = (pid > 0)
-                        .then(|| crate::platform::foreground_process_name(pid))
+                    let observed = (pid > 0)
+                        .then(|| crate::platform::foreground_process_observation(pid))
                         .flatten()
-                        .as_deref()
-                        .and_then(sanitize_process_name);
-                    if previous.as_ref() != Some(&name) {
+                        .map(|observation| {
+                            (
+                                sanitize_process_name(&observation.name),
+                                observation.child.as_deref().and_then(sanitize_process_name),
+                            )
+                        })
+                        .unwrap_or((None, None));
+                    if previous.as_ref() != Some(&observed) {
                         if events
                             .send(AppEvent::ForegroundProcessChanged {
                                 pane_id,
-                                name: name.clone(),
+                                name: observed.0.clone(),
+                                child_name: observed.1.clone(),
                             })
                             .await
                             .is_err()
                         {
                             break;
                         }
-                        previous = Some(name);
+                        previous = Some(observed);
                     }
                 }
             })

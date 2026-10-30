@@ -46,6 +46,13 @@ impl Default for UpdateConfig {
     }
 }
 
+pub(crate) fn default_tab_process_wrappers() -> Vec<String> {
+    ["doas", "pkexec", "sudo"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
 fn default_update_channel() -> UpdateChannelConfig {
     default_update_channel_for_build(cfg!(windows), crate::build_info::is_preview())
 }
@@ -1038,6 +1045,11 @@ pub struct UiConfig {
     pub tab_bar_position: TabBarPositionConfig,
     /// Show position numbers before custom-named desktop tabs. Default: false.
     pub tab_bar_numbers: bool,
+    /// Programs that only launch another process. The tab row shows the
+    /// launched program instead, so `sudo vim` reads as `vim`. Set to an empty
+    /// list to always show the wrapper itself.
+    /// Default: ["doas", "pkexec", "sudo"].
+    pub tab_process_wrappers: Vec<String>,
     /// Ordered entries shown at the right edge of the desktop tab row. Empty by default.
     pub tab_bar_right: Vec<TabBarRightEntryConfig>,
     /// Text inserted between visible right-side tab bar entries. Default: one space.
@@ -1294,6 +1306,7 @@ impl Default for UiConfig {
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_numbers: false,
+            tab_process_wrappers: default_tab_process_wrappers(),
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
             tab_status: true,
@@ -1640,6 +1653,10 @@ tab_status_order = "priority"
             TabBarPositionConfig::Top
         );
         assert!(!default_config.ui.tab_bar_numbers);
+        assert_eq!(
+            default_config.ui.tab_process_wrappers,
+            ["doas", "pkexec", "sudo"]
+        );
         assert!(default_config.ui.tab_bar_right.is_empty());
         assert_eq!(default_config.ui.tab_bar_right_separator, " ");
 
@@ -1653,6 +1670,7 @@ show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
 tab_bar_numbers = true
+tab_process_wrappers = []
 tab_bar_right = [
   { type = "zoom" },
   { type = "hostname" },
@@ -1671,6 +1689,8 @@ tab_bar_right_separator = " · "
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
         assert!(config.ui.tab_bar_numbers);
+        // An explicit empty list disables wrapper unwrapping.
+        assert!(config.ui.tab_process_wrappers.is_empty());
         assert_eq!(config.ui.tab_bar_right.len(), 5);
         assert!(matches!(
             config.ui.tab_bar_right[1],

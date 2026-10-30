@@ -151,6 +151,38 @@ pub struct ForegroundJob {
     pub processes: Vec<ForegroundProcess>,
 }
 
+/// Foreground process of a pane, named for client-owned labels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ForegroundProcessObservation {
+    /// Foreground process group leader.
+    pub name: String,
+    /// Newest program launched by that leader in the same process group.
+    pub child: Option<String>,
+}
+
+/// Newest direct child that still shares the leader's process group.
+///
+/// A wrapper such as `sudo` hands control to its child immediately, so the
+/// newest direct child is the program the user actually started. Group members
+/// outside that group, and children re-grouped for their own job control, are
+/// ignored so the label never names an unrelated background process.
+pub(crate) fn newest_group_child(
+    leader_pid: u32,
+    group_id: u32,
+    members: impl IntoIterator<Item = (u32, u32, u32, String)>,
+) -> Option<String> {
+    members
+        .into_iter()
+        .filter(|(pid, parent_pid, process_group_id, name)| {
+            *parent_pid == leader_pid
+                && *pid != leader_pid
+                && *process_group_id == group_id
+                && !name.is_empty()
+        })
+        .max_by_key(|(pid, ..)| *pid)
+        .map(|(_, _, _, name)| name)
+}
+
 /// A request from outside the process to stop the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ServerQuitSignal {
@@ -798,6 +830,55 @@ fn child_exit_classification_only_checkpoints_interruptions() {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newest_group_child_names_the_program_a_wrapper_started() {
+        let members = |entries: Vec<(u32, u32, u32, &str)>| {
+            entries
+                .into_iter()
+                .map(|(pid, parent, group, name)| (pid, parent, group, name.to_owned()))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            newest_group_child(10, 10, members(vec![(11, 10, 10, "vim")])).as_deref(),
+            Some("vim")
+        );
+        // The newest direct child wins when a wrapper runs more than one.
+        assert_eq!(
+            newest_group_child(
+                10,
+                10,
+                members(vec![
+                    (11, 10, 10, "sh"),
+                    (14, 10, 10, "vim"),
+                    (12, 10, 10, "less")
+                ])
+            )
+            .as_deref(),
+            Some("vim")
+        );
+        // Children that left the group, grandchildren, and the leader itself
+        // never replace the leader's own name.
+        assert_eq!(
+            newest_group_child(
+                10,
+                10,
+                members(vec![
+                    (10, 9, 10, "sudo"),
+                    (11, 10, 11, "regrouped"),
+                    (12, 11, 10, "grandchild"),
+                    (13, 9, 10, "sibling"),
+                ])
+            ),
+            None
+        );
+        assert_eq!(
+            newest_group_child(10, 10, members(vec![(11, 10, 10, "")])),
+            None
+        );
+        assert_eq!(newest_group_child(10, 10, Vec::new()), None);
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

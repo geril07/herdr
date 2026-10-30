@@ -140,7 +140,10 @@ pub struct TerminalState {
     reported_resume: Option<crate::agent_resume::ReportedAgentResume>,
     reported_resume_revision: u64,
     pub terminal_title: Option<String>,
+    /// Foreground process group leader of the pane's terminal.
     pub foreground_process_name: Option<String>,
+    /// Program launched by a wrapper leader such as `sudo`.
+    pub foreground_process_child: Option<String>,
     pub manual_label: Option<String>,
     pub agent_name: Option<String>,
     agent_name_owner: Option<AgentNameOwner>,
@@ -183,6 +186,7 @@ impl TerminalState {
             reported_resume_revision: 0,
             terminal_title: None,
             foreground_process_name: None,
+            foreground_process_child: None,
             manual_label: None,
             agent_name: None,
             agent_name_owner: None,
@@ -2038,6 +2042,19 @@ impl TerminalState {
             || crate::detect::parse_agent_label(&authority.agent_label).is_none_or(|agent| {
                 self.detected_agent == Some(agent) && self.recent_agent_process_exit.is_none()
             })
+    }
+
+    /// Name shown for the pane's foreground process.
+    ///
+    /// A wrapper such as `sudo` only starts another program, so the launched
+    /// program is what the user is actually running. `wrappers` comes from
+    /// `tab_process_wrappers`, so an empty list keeps wrappers visible.
+    pub fn foreground_process_label(&self, wrappers: &[String]) -> Option<&str> {
+        let name = self.foreground_process_name.as_deref()?;
+        if !wrappers.iter().any(|wrapper| wrapper == name) {
+            return Some(name);
+        }
+        Some(self.foreground_process_child.as_deref().unwrap_or(name))
     }
 
     pub fn effective_agent_label(&self) -> Option<&str> {
