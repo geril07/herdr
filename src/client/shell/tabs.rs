@@ -522,10 +522,14 @@ fn max_tab_scroll(widths: &[u16], available: u16) -> usize {
 }
 
 fn tab_label(tab: &ClientShellTab) -> String {
+    let name = match (tab.custom_label, tab.foreground_process_name.as_deref()) {
+        (false, Some(process)) => format!("{} {process}", tab.label),
+        _ => tab.label.clone(),
+    };
     if tab.zoomed {
-        format!("{} Z", tab.label)
+        format!("{name} Z")
     } else {
-        tab.label.clone()
+        name
     }
 }
 
@@ -625,6 +629,7 @@ mod tests {
                     custom_label: false,
                     zoomed: false,
                     agent_status: AgentStatus::Idle,
+                    foreground_process_name: None,
                 },
                 ClientShellTab {
                     focused: false,
@@ -635,6 +640,7 @@ mod tests {
                     custom_label: false,
                     zoomed: false,
                     agent_status: AgentStatus::Idle,
+                    foreground_process_name: None,
                 },
                 ClientShellTab {
                     focused: false,
@@ -645,6 +651,7 @@ mod tests {
                     custom_label: false,
                     zoomed: false,
                     agent_status: AgentStatus::Idle,
+                    foreground_process_name: None,
                 },
             ],
             panes: vec![
@@ -908,8 +915,8 @@ mod tests {
     #[test]
     fn process_tab_labels_keep_statuses_and_one_position_number() {
         let mut snapshot = make_test_snapshot();
-        snapshot.tabs[0].label = "1 zsh".into();
-        snapshot.tabs[1].label = "2 sleep".into();
+        snapshot.tabs[0].foreground_process_name = Some("zsh".into());
+        snapshot.tabs[1].foreground_process_name = Some("sleep".into());
         let mut cfg = Config::default();
         cfg.ui.tab_bar_numbers = true;
         let config = ClientShellConfig::from_config(&cfg);
@@ -930,6 +937,33 @@ mod tests {
         assert!(row.contains("● ● 2 sleep"), "{row}");
         assert!(!row.contains("1 1"));
         assert!(!row.contains("2 2"));
+    }
+
+    #[test]
+    fn process_names_only_decorate_unnamed_tab_labels() {
+        let mut snapshot = make_test_snapshot();
+        snapshot.tabs[0].foreground_process_name = Some("zsh".into());
+        snapshot.tabs[0].zoomed = true;
+        snapshot.tabs[1].label = "logs".into();
+        snapshot.tabs[1].custom_label = true;
+        snapshot.tabs[1].foreground_process_name = Some("vim".into());
+        let config = ClientShellConfig::from_config(&Config::default());
+        let area = Rect::new(0, 0, 70, 1);
+        let mut buffer = Buffer::empty(area);
+        render_tab_bar(
+            &mut buffer,
+            area,
+            &snapshot,
+            &config,
+            &mut 0,
+            &mut false,
+            None,
+            &mut ShellHitMap::default(),
+        );
+        let row: String = (0..area.width).map(|x| buffer[(x, 0)].symbol()).collect();
+        assert!(row.contains("1 zsh Z"), "{row}");
+        assert!(row.contains("logs"), "{row}");
+        assert!(!row.contains("vim"), "{row}");
     }
 
     #[test]

@@ -109,26 +109,21 @@ pub(super) fn snapshot_with_completions(
         )
         .map(|(tab, state)| {
             let tab_id = tab.tab_id;
-            let label = if state.is_auto_named() {
-                state
-                    .panes
-                    .get(&state.layout.focused())
-                    .and_then(|pane| app.state.terminals.get(&pane.attached_terminal_id))
-                    .and_then(|terminal| terminal.foreground_process_name.as_deref())
-                    .map(|name| format!("{} {name}", tab.label))
-                    .unwrap_or(tab.label)
-            } else {
-                tab.label
-            };
+            let foreground_process_name = state
+                .panes
+                .get(&state.layout.focused())
+                .and_then(|pane| app.state.terminals.get(&pane.attached_terminal_id))
+                .and_then(|terminal| terminal.foreground_process_name.clone());
             protocol::ClientShellTab {
                 focused: focused_tab_id.as_deref() == Some(tab_id.as_str()),
                 tab_id,
                 workspace_id: tab.workspace_id,
                 number: tab.number,
-                label,
+                label: tab.label,
                 custom_label: !state.is_auto_named(),
                 zoomed: state.zoomed,
                 agent_status: tab.agent_status,
+                foreground_process_name,
             }
         })
         .collect();
@@ -740,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn process_tab_labels_follow_focus_without_changing_tab_identity() {
+    fn tab_foreground_process_follows_focus_without_decorating_tab_labels() {
         let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = crate::app::App::new(
             &crate::config::Config::default(),
@@ -763,9 +758,14 @@ mod tests {
 
         let project = |app: &app::App| snapshot(app, "boot", 1, None, None);
         let shell = project(&app);
-        assert_eq!(shell.tabs[0].label, "1 sleep");
+        assert_eq!(shell.tabs[0].label, "1");
         assert!(!shell.tabs[0].custom_label);
+        assert_eq!(
+            shell.tabs[0].foreground_process_name.as_deref(),
+            Some("sleep")
+        );
         assert_eq!(shell.tabs[1].label, "2");
+        assert_eq!(shell.tabs[1].foreground_process_name, None);
         assert_eq!(app.session_metadata_snapshot().tabs[0].label, "1");
         let pane = app
             .session_metadata_snapshot()
@@ -776,20 +776,39 @@ mod tests {
         assert_eq!(pane.agent_status, crate::api::schema::AgentStatus::Unknown);
 
         app.state.workspaces[0].tabs[0].layout.focus_pane(first);
-        assert_eq!(project(&app).tabs[0].label, "1 zsh");
+        let focused = project(&app);
+        assert_eq!(focused.tabs[0].label, "1");
+        assert_eq!(
+            focused.tabs[0].foreground_process_name.as_deref(),
+            Some("zsh")
+        );
         app.state.workspaces[0].active_tab = 1;
-        assert_eq!(project(&app).tabs[0].label, "1 zsh");
+        assert_eq!(
+            project(&app).tabs[0].foreground_process_name.as_deref(),
+            Some("zsh")
+        );
         app.state.workspaces[0].tabs[0].set_custom_name("backend".into());
         app.state
             .set_foreground_process_name(first, Some("vim".into()));
         let named = project(&app);
         assert_eq!(named.tabs[0].label, "backend");
         assert!(named.tabs[0].custom_label);
+        assert_eq!(
+            named.tabs[0].foreground_process_name.as_deref(),
+            Some("vim")
+        );
         app.state.workspaces[0].tabs[0].set_custom_name(" ".into());
-        assert_eq!(project(&app).tabs[0].label, "1 vim");
+        let cleared = project(&app);
+        assert_eq!(cleared.tabs[0].label, "1");
+        assert_eq!(
+            cleared.tabs[0].foreground_process_name.as_deref(),
+            Some("vim")
+        );
         app.state.set_foreground_process_name(first, None);
-        assert_eq!(project(&app).tabs[0].label, "1");
-        assert_eq!(project(&app).tabs[0].tab_id, shell.tabs[0].tab_id);
+        let unknown = project(&app);
+        assert_eq!(unknown.tabs[0].label, "1");
+        assert_eq!(unknown.tabs[0].foreground_process_name, None);
+        assert_eq!(unknown.tabs[0].tab_id, shell.tabs[0].tab_id);
         app.state.assert_invariants_for_test();
     }
 
